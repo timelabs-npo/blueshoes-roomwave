@@ -11,7 +11,7 @@ private func sample(_ points: [Vector3] = inventedPoints, source: ScanSource = .
 }
 
 private func square(source: ScanSource = .synthetic, seed: UInt64 = 42,
-                    rules: RaceRules = .standard, points: [TrackPoint]? = nil,
+                    rules: RaceRules = rule(), points: [TrackPoint]? = nil,
                     schema: Int = 1, generator: String = "fixture-1") -> TrackDefinition {
     let route = [(-10.0, -10.0), (10.0, -10.0), (10.0, 10.0), (-10.0, 10.0)]
         .enumerated().map { i, p in
@@ -30,7 +30,7 @@ private func rule(tickRate: Int = 60, duration: Int = 5400, initial: Double = 4,
 }
 
 @Test func normalizationPreservesOriginAndDropsCaptureIdentity() throws {
-    for source in [ScanSource.synthetic, .arkitMesh] {
+    for source in [ScanSource.synthetic, .arkitMesh, .photoDerived] {
         let normalized = try ScanNormalizer.normalize(sample(source: source))
         #expect(normalized.source == source)
         #expect(normalized.normalizationVersion == 1)
@@ -64,22 +64,25 @@ private func rule(tickRate: Int = 60, duration: Int = 5400, initial: Double = 4,
     #expect(throws: RoomwaveError.self) { try ScanNormalizer.normalize(sample(tiny)) }
 }
 
-@Test func generationIsDeterministicBoundedAndCoarse() throws {
+@Test func generationIsDeterministicBoundedAndUsesPointDistribution() throws {
     let normalized = try ScanNormalizer.normalize(sample())
     let track = try TrackGenerator.makeTrack(from: normalized, seed: 42)
     #expect(track == (try TrackGenerator.makeTrack(from: normalized, seed: 42)))
     #expect(track.points != (try TrackGenerator.makeTrack(from: normalized, seed: 43)).points)
     #expect(track.points.count == 32)
-    #expect(Array(track.points.prefix(3)).map(\.position) == [Vector3(x: -3.280, y: 0, z: 18.052),
-                                                            Vector3(x: -5.457, y: 0, z: 17.298),
-                                                            Vector3(x: -7.425, y: 0, z: 15.880)])
+    #expect(track.generatorVersion == "sector-contour-splitmix64-2")
+    #expect(track.rules.version == "roomwave-pilot-2")
+    #expect(Set(track.points.map(\.halfWidth)) == Set([0.65]))
     #expect(track.points.filter(\.isGate).count == 4)
     #expect(track.points.first != track.points.last) // Closure is implicit, not a duplicate vertex.
     #expect(track.points.allSatisfy { abs($0.position.x) <= 27 && abs($0.position.z) <= 27 && $0.position.y == 0 })
     #expect(TrackValidator.validate(track).isEmpty)
-    // Same bounds with an invented interior point changes local data, not finalized layout.
+    // Identical AABB, but different point distribution must affect actual turns.
     let withInterior = try ScanNormalizer.normalize(sample(inventedPoints + [Vector3(x: 0, y: 0.5, z: 0)]))
-    #expect(track == (try TrackGenerator.makeTrack(from: withInterior, seed: 42)))
+    #expect(track.points != (try TrackGenerator.makeTrack(from: withInterior, seed: 42)).points)
+    let reordered = NormalizedScan(source: normalized.source, normalizationVersion: 1,
+                                   points: Array(normalized.points.reversed()))
+    #expect(track == (try TrackGenerator.makeTrack(from: reordered, seed: 42)))
     for seed in [UInt64(0), 1, 123456, UInt64.max] {
         #expect(TrackValidator.validate(try TrackGenerator.makeTrack(from: normalized, seed: seed)).isEmpty)
     }
@@ -122,7 +125,8 @@ private func rule(tickRate: Int = 60, duration: Int = 5400, initial: Double = 4,
     #expect(TrackValidator.validate(square(points: sharp)).contains { $0.code == "curvature" })
     let invalidRules = [rule(tickRate: 0), rule(tickRate: Int.max), rule(duration: 0), rule(duration: Int.max),
                         rule(initial: 0), rule(maximum: 3), rule(acceleration: -1), rule(steering: .nan),
-                        rule(bank: 0), rule(bank: 1.1), rule(gain: .infinity), rule(gain: 0), rule(version: "")]
+                        rule(bank: 0), rule(bank: 1.1), rule(gain: .infinity), rule(gain: 0), rule(version: ""),
+                        rule(version: "unknown-future-rules")]
     for rules in invalidRules { #expect(TrackValidator.validate(square(rules: rules)).contains { $0.code == "rules" }) }
     #expect(!TrackValidator.validate(square(schema: 2)).isEmpty)
     #expect(!TrackValidator.validate(square(generator: "")).isEmpty)
@@ -134,8 +138,10 @@ private func rule(tickRate: Int = 60, duration: Int = 5400, initial: Double = 4,
     #expect(baseline.count == 293)
     #expect(baseline.map { String(format: "%02x", $0) }.joined() == "726f6f6d776176652d747261636b2d6964656e746974792d763100000000000000000100000009666978747572652d310000000973796e746865746963000000000000002a00000010726f6f6d776176652d72756c65732d31000000000000003c0000000000001518401000000000000040280000000000003fb999999999999a40080000000000003fe80000000000003fd00000000000000000000000000004ffffffffffffd8f00000000000000000ffffffffffffd8f000000000000003e80100000000000027100000000000000000ffffffffffffd8f000000000000003e80000000000000027100000000000000000000000000000271000000000000003e800ffffffffffffd8f00000000000000000000000000000271000000000000003e800")
     #expect(baseline.starts(with: Data("roomwave-track-identity-v1\0".utf8)))
+    // Keep the original rules-1 canonical/hash vector as a legacy compatibility fixture.
+    #expect(baseline != (try TrackIdentity.canonicalData(for: square(rules: .standard))))
     let changedRules = [rule(tickRate: 30), rule(duration: 100), rule(initial: 5), rule(maximum: 13),
-                        rule(acceleration: 0.2), rule(steering: 4), rule(bank: 0.5), rule(gain: 0.5), rule(version: "v2")]
+                        rule(acceleration: 0.2), rule(steering: 4), rule(bank: 0.5), rule(gain: 0.5), rule(version: "roomwave-pilot-2")]
     for rules in changedRules { #expect(baseline != (try TrackIdentity.canonicalData(for: square(rules: rules)))) }
     #expect(baseline != (try TrackIdentity.canonicalData(for: square(source: .arkitMesh))))
     #expect(baseline != (try TrackIdentity.canonicalData(for: square(seed: 43))))

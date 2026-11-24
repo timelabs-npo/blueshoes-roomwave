@@ -20,7 +20,7 @@ public enum RaceSimulation {
               (-1.0...1.0).contains(input.steering) else {
             throw RoomwaveError.invalidInput("Expected the next tick and finite steering in [-1, 1]")
         }
-        // The scan lane owns admission. Keep this frozen dependency in place.
+        // Admit finalized geometry before using it for scoring or bend pressure.
         let issues = TrackValidator.validate(track)
         guard issues.isEmpty else {
             throw RoomwaveError.invalidTrack(issues.map { $0.code }.joined(separator: ", "))
@@ -29,6 +29,7 @@ public enum RaceSimulation {
         let dt = 1 / Double(rules.tickRate)
         var speed = min(rules.maximumSpeed, state.speed + rules.acceleration * dt)
         let advance = speed * dt
+        let tickSpeed = speed
         guard advance.isFinite, advance > 0,
               (state.distance + advance).isFinite, state.distance + advance > state.distance else {
             throw RoomwaveError.invalidInput("Distance cannot advance finitely at this precision")
@@ -49,6 +50,7 @@ public enum RaceSimulation {
         var multiplier = state.multiplier
         var bankRequested = input.bank
         var crossings = 0
+        var lateral = state.lateralOffset
 
         // Distance/steering for this tick use accelerated speed. A bank changes
         // the next tick's speed; scoring is split at every crossed gate.
@@ -65,7 +67,20 @@ public enum RaceSimulation {
             let reachesVertex = amount == toVertex
             travelled = min(advance, travelled + amount)
             phase += amount
-            let lateral = state.lateralOffset + lateralChange * (travelled / advance)
+            if rules.version == "roomwave-pilot-2" {
+                // A signed turn distributed over this segment pushes outward.
+                // Pressure grows with speed squared, capped at 80% of steering
+                // authority so correction retains headroom. No hidden velocity
+                // or frame-time state is needed for replay. Banks affect only
+                // next tick's movement, including this pressure calculation.
+                let limit = 0.8 * rules.steeringSpeed
+                let pressure = max(-limit, min(limit, -0.45 * tickSpeed * tickSpeed * route.curvatures[segment]))
+                lateral += (input.steering * rules.steeringSpeed + pressure) * (amount / tickSpeed)
+            } else {
+                // Preserve rules-1's neutral, linear lateral movement exactly.
+                lateral = state.lateralOffset + lateralChange * (travelled / advance)
+            }
+            guard lateral.isFinite else { throw RoomwaveError.invalidInput("Lateral movement overflow") }
             let width = route.width(segment: segment, phase: phase)
             // Width and lateral movement are linear on each segment. Testing
             // every vertex and the endpoint also catches intermediate narrowing.
@@ -103,19 +118,22 @@ public enum RaceSimulation {
             multiplier = 1
         }
         return try checked(RaceState(tick: input.tick, distance: state.distance + advance,
-            lateralOffset: state.lateralOffset + lateralChange, speed: speed,
+            lateralOffset: lateral, speed: speed,
             bankedScore: banked, unbankedScore: chain, multiplier: multiplier,
             status: finished ? .finished : .running), rules: rules)
     }
 
     private static func validate(_ rules: RaceRules) throws {
-        guard !rules.version.isEmpty, rules.tickRate > 0, rules.durationTicks > 0,
+        guard rules.version == "roomwave-rules-1" || rules.version == "roomwave-pilot-2" else {
+            throw RoomwaveError.invalidInput("Unsupported race rules version: \(rules.version)")
+        }
+        guard (1...240).contains(rules.tickRate), (1...864000).contains(rules.durationTicks),
               rules.initialSpeed.isFinite, rules.initialSpeed > 0,
-              rules.maximumSpeed.isFinite, rules.maximumSpeed >= rules.initialSpeed,
-              rules.acceleration.isFinite, rules.acceleration >= 0,
-              rules.steeringSpeed.isFinite, rules.steeringSpeed >= 0,
+              rules.maximumSpeed.isFinite, rules.maximumSpeed >= rules.initialSpeed, rules.maximumSpeed <= 100,
+              rules.acceleration.isFinite, (0...100).contains(rules.acceleration),
+              rules.steeringSpeed.isFinite, rules.steeringSpeed > 0, rules.steeringSpeed <= 100,
               rules.bankSpeedFactor.isFinite, rules.bankSpeedFactor > 0, rules.bankSpeedFactor <= 1,
-              rules.multiplierGain.isFinite, rules.multiplierGain >= 0 else {
+              rules.multiplierGain.isFinite, rules.multiplierGain > 0, rules.multiplierGain <= 10 else {
             throw RoomwaveError.invalidInput("Invalid race rules")
         }
     }
@@ -159,6 +177,7 @@ public enum RaceSimulation {
         let starts: [Double]
         let ends: [Double]
         let length: Double
+        let curvatures: [Double]
 
         init(_ points: [TrackPoint]) throws {
             guard (3...256).contains(points.count) else {
@@ -187,6 +206,19 @@ public enum RaceSimulation {
             self.starts = starts
             self.ends = ends
             self.length = total
+            // Include both sides of the implicit closing seam. Each vertex's
+            // signed heading change contributes half to each adjacent segment.
+            let turns = points.indices.map { i -> Double in
+                let a = points[(i + points.count - 1) % points.count].position
+                let b = points[i].position
+                let c = points[(i + 1) % points.count].position
+                let ux = b.x - a.x, uz = b.z - a.z
+                let vx = c.x - b.x, vz = c.z - b.z
+                return atan2(ux * vz - uz * vx, ux * vx + uz * vz)
+            }
+            self.curvatures = points.indices.map { i in
+                (turns[i] + turns[(i + 1) % points.count]) / (2 * (ends[i] - starts[i]))
+            }
         }
 
         func segment(at phase: Double) -> Int {

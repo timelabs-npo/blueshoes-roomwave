@@ -8,7 +8,7 @@ final class RaceTests: XCTestCase {
     private func rules(tickRate: Int = 2, duration: Int = 100, initial: Double = 4,
                        maximum: Double = 4, acceleration: Double = 0, steering: Double = 3,
                        bankFactor: Double = 0.5, gain: Double = 0.5) -> RaceRules {
-        RaceRules(version: "race-test-1", tickRate: tickRate, durationTicks: duration,
+        RaceRules(version: "roomwave-rules-1", tickRate: tickRate, durationTicks: duration,
                   initialSpeed: initial, maximumSpeed: maximum, acceleration: acceleration,
                   steeringSpeed: steering, bankSpeedFactor: bankFactor, multiplierGain: gain)
     }
