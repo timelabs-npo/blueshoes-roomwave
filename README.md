@@ -1,28 +1,42 @@
 # Blueshoes: Roomwave
 
-An early native iOS game research project: scan a small space, turn its coarse shape into a stylized racing circuit, and share an equal-rules challenge.
+Turn a space or a photo into a stylised racing circuit, ride a layered animated character, and bank your score before the next risky turn.
 
-**Status: structural first slice from three completed Codex turns, proposed on a draft integration branch. No iOS build, physical LiDAR capture, gameplay acceptance, TestFlight delivery, or live X integration is verified yet.**
+Roomwave is a native Swift/SwiftUI/ARKit/RealityKit pilot targeting iOS 27, with iPhone 18 Pro Max as the reference device. The project is MIT-licensed; third-party artwork retains its own notices.
 
-- Target: iOS 27, SwiftUI, ARKit scene reconstruction, RealityKit.
-- Core: Swift 6 package; scan normalization, bounded track generation, deterministic custom racing state and replay contracts.
-- Scan first, stop capture, then race. Synthetic fixtures remain explicitly synthetic.
-- Share final stylized track geometry and rules after user review; never raw scans, camera frames, room labels or world maps.
-- RaceScore measures gameplay; CreatorReputation is separate. Social likes/reposts never improve race score.
-- X: user-initiated system sharing only in the first slice. No OAuth, API posting, scraping or engagement rewards.
-- Hugging Face: optional cosmetic/style tooling may be evaluated later. No remote inference, scan uploads or model downloads in this slice.
+## Pilot features
 
-The current route generator is an ellipse placeholder driven by coarse aspect ratio. Neutral steering follows the centerline automatically, so this slice is not yet a skill challenge. See [integration readiness](docs/INTEGRATION_READINESS.md) and the [sanitized swarm receipt](docs/SWARM_RUN.md).
+- **Photo maps:** ImageIO decodes and orients an image locally. Vision attention saliency, contrast and Sobel features produce an inferred 2.5D sample. The generated circuit depends on those features. A single photo is not treated as calibrated depth or a measured reconstruction.
+- **LiDAR tracks:** capability-checked ARKit mesh samples are transformed into a common gravity-aligned frame, bounded, checked for freshness and converted into a stylised circuit. Scan coverage and device quality still require physical testing.
+- **Playable bend pressure:** steering counters curvature-dependent outward pressure. An initial two-second grace period and three-second ramp allow orientation; a bank request saves the chain at the next gate.
+- **Layered rider:** a redistributed CC0 humanoid, articulated rig, authored glide animation, and separately switchable Skin, Coat, SkeletonOverlay and MuscleOverlay groups. The visible skeleton/muscle overlays are stylised animation helpers, not medical anatomy or biological simulation.
+- **Local sharing:** the user can review and export final track geometry and rules. Raw camera frames, photographs, mesh samples and local capture IDs are excluded from the challenge descriptor.
+- **Synthetic demo:** an explicitly labelled, invented track source is available without camera or photo access.
 
-## Layout
+## Development
 
-- Sources/RoomwaveCore/Contracts.swift — frozen shared data models.
-- Sources/RoomwaveCore — isolated scan and race implementation lanes.
-- Tests/RoomwaveCoreTests — authored acceptance tests; execution evidence must be recorded separately.
-- apps/ios — native shell prepared by the platform lane.
-- docs/CONCEPT.md — gameplay and scope.
-- docs/CONTRACTS.md — API ownership and invariants.
+Use stable Xcode 27.2 and XcodeGen. The deployment target is iOS 27.0.
 
-Run `swift test` on a compatible Swift host. Native builds require an Xcode 27 macOS environment and separate device acceptance. No command in this README claims it has already passed.
+```sh
+swift test
+cd apps/ios
+xcodegen generate --spec project.yml
+open Roomwave.xcodeproj
+```
 
-Original code: MIT. Dependencies, optional model weights and external assets retain their licenses. This repository is separate from the existing Blueshoes networking project, WORLD.EXE, Rhea RF Spanner and Molecule Foundry.
+Shared gameplay and geometry live in Sources/RoomwaveCore. Native code lives in apps/ios/Roomwave.
+The unsigned workflow separately checks the core, native build and simulator tests. A successful simulator result cannot establish LiDAR quality, frame-rate or thermal behavior on an iPhone.
+Signing and TestFlight delivery use protected release configuration, never checked-in credentials.
+
+## Design and verification
+
+- [Product brief](docs/PRODUCT_BRIEF_RU.md)
+- [LiDAR specification](docs/LIDAR_SPEC.md)
+- [Pilot contracts](docs/PILOT_CONTRACTS.md)
+- [Gameplay implementation](docs/PILOT_GAMEPLAY.md)
+- [Photo analysis](docs/PILOT_PHOTO.md)
+- [Avatar resources and provenance](docs/AVATAR_ASSETS.md)
+- [Pilot swarm receipt](docs/PILOT_SWARM_RUN.md)
+
+Photo analysis and race execution do not require a remote model service.
+Public challenge hosting, X OAuth/API, social reputation, video capture and server-side score verification are separate future features.

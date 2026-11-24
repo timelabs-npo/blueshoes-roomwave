@@ -12,7 +12,7 @@ files were not edited. The coordinator-prepared standard rules remain
   is the mean of its endpoint turns divided by segment length. Both endpoint
   turns include the implicit closing segment.
 - Lateral velocity is `steering * steeringSpeed + pressure`, where pressure is
-  `-0.45 * speedSquared * curvature`, clamped to plus/minus
+  `-0.18 * speedSquared * curvature` with a deterministic onset: no pressure for the first two seconds, then a linear three-second ramp, clamped to plus/minus
   `0.8 * steeringSpeed`. Pressure is constant within each segment during a tick.
   There is no new hidden state or platform physics dependency. Full correction
   has headroom; this is a custom arcade rule, not a physical vehicle model.
@@ -61,7 +61,7 @@ The correction driver reads only observed offset, not the pressure equation.
 Existing race tests exercise legacy gate scoring, interpolated narrowing,
 multi-gate ticks, seams, crashes and replay tampering.
 
-Executed locally on Windows:
+Executed locally on Windows by the worker before coordinator onboarding tuning (these arithmetic-model numbers do not validate the later gain/ramp):
 
 - `git diff --check`: passed.
 - Frozen-file diff check for `Contracts.swift` and `Package.swift`: no changes.

@@ -74,7 +74,9 @@ public enum RaceSimulation {
                 // or frame-time state is needed for replay. Banks affect only
                 // next tick's movement, including this pressure calculation.
                 let limit = 0.8 * rules.steeringSpeed
-                let pressure = max(-limit, min(limit, -0.45 * tickSpeed * tickSpeed * route.curvatures[segment]))
+                let raceSeconds = Double(state.tick) / Double(rules.tickRate)
+                let onset = min(1.0, max(0.0, (raceSeconds - 2.0) / 3.0))
+                let pressure = onset * max(-limit, min(limit, -0.18 * tickSpeed * tickSpeed * route.curvatures[segment]))
                 lateral += (input.steering * rules.steeringSpeed + pressure) * (amount / tickSpeed)
             } else {
                 // Preserve rules-1's neutral, linear lateral movement exactly.

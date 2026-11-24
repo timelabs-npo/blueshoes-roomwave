@@ -74,8 +74,8 @@ final class RoomwaveModel: ObservableObject {
 
     func importPhotoData(_ data: Data) async {
         reset()
-        guard !data.isEmpty, data.count <= 30 * 1024 * 1024 else {
-            message = "Choose a photo smaller than 30 MB."
+        guard !data.isEmpty, data.count <= 20 * 1024 * 1024 else {
+            message = "Choose a photo smaller than 20 MB."
             return
         }
         let token = operation

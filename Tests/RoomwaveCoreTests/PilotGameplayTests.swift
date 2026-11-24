@@ -43,7 +43,8 @@ final class PilotGameplayTests: XCTestCase {
                 input: RaceInput(tick: idle.tick + 1, steering: 0, bank: false), track: track)
         }
         XCTAssertEqual(idle.status, .crashed)
-        XCTAssertLessThan(idle.tick, 600)
+        XCTAssertGreaterThanOrEqual(idle.tick, 300)
+        XCTAssertLessThan(idle.tick, 720)
         XCTAssertEqual(idle.bankedScore, 0)
         XCTAssertEqual(idle.unbankedScore, 0)
 
@@ -108,10 +109,10 @@ final class PilotGameplayTests: XCTestCase {
                            halfWidth: $0.halfWidth, isGate: $0.isGate)
             })
         func moving(speed: Double) -> RaceState {
-            RaceState(tick: 1, distance: 0, lateralOffset: 0, speed: speed,
+            RaceState(tick: 300, distance: 0, lateralOffset: 0, speed: speed,
                 bankedScore: 0, unbankedScore: 0, multiplier: 1, status: .running)
         }
-        let neutral = RaceInput(tick: 2, steering: 0, bank: false)
+        let neutral = RaceInput(tick: 301, steering: 0, bank: false)
         let slow = try RaceSimulation.step(state: moving(speed: 4), input: neutral, track: track)
         let fast = try RaceSimulation.step(state: moving(speed: 12), input: neutral, track: track)
         let reflected = try RaceSimulation.step(state: moving(speed: 4), input: neutral, track: mirrored)
@@ -119,12 +120,12 @@ final class PilotGameplayTests: XCTestCase {
         XCTAssertGreaterThan(abs(fast.lateralOffset), abs(slow.lateralOffset))
         XCTAssertLessThanOrEqual(abs(fast.lateralOffset), 0.8 * 3 / 60 + 1e-12)
         XCTAssertEqual(slow.lateralOffset, -reflected.lateralOffset, accuracy: 1e-12)
-        let correction = RaceInput(tick: 2, steering: slow.lateralOffset < 0 ? 1 : -1, bank: false)
+        let correction = RaceInput(tick: 301, steering: slow.lateralOffset < 0 ? 1 : -1, bank: false)
         let steered = try RaceSimulation.step(state: moving(speed: 12), input: correction, track: track)
         XCTAssertLessThan(steered.lateralOffset * fast.lateralOffset, 0)
         let legacy = replacingRules(track, version: "roomwave-rules-1")
         let linear = try RaceSimulation.step(state: moving(speed: 4),
-            input: RaceInput(tick: 2, steering: 0.25, bank: false), track: legacy)
+            input: RaceInput(tick: 301, steering: 0.25, bank: false), track: legacy)
         XCTAssertEqual(linear.lateralOffset, 0.25 * 3 / 60, accuracy: 1e-12)
     }
 
