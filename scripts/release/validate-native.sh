@@ -29,7 +29,7 @@ fi
 tail -n 45 build/release/native-test.log
 if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configuration Release \
   -destination 'generic/platform=iOS' -archivePath build/release/UnsignedRoomwave.xcarchive \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=1 MARKETING_VERSION=0.1.0 \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=1 MARKETING_VERSION=0.2.0 \
   archive > build/release/unsigned-archive.log 2>&1; then
   tail -n 120 build/release/unsigned-archive.log
   exit 1
