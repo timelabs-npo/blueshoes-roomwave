@@ -1,7 +1,7 @@
 import Foundation
 
 // Frozen public data contract. Source markers are provenance labels, not remote attestation.
-public enum ScanSource: String, Codable, Sendable { case synthetic, arkitMesh }
+public enum ScanSource: String, Codable, Sendable { case synthetic, arkitMesh, photoDerived }
 public enum RaceStatus: String, Codable, Sendable { case running, finished, crashed }
 public enum RoomwaveError: Error, Equatable, Sendable {
     case invalidScan(String)
@@ -197,7 +197,7 @@ public struct ValidationIssue: Codable, Equatable, Sendable {
 
 public extension RaceRules {
     static let standard = RaceRules(
-        version: "roomwave-rules-1", tickRate: 60, durationTicks: 5400,
+        version: "roomwave-pilot-2", tickRate: 60, durationTicks: 5400,
         initialSpeed: 4, maximumSpeed: 12, acceleration: 0.10,
         steeringSpeed: 3, bankSpeedFactor: 0.75, multiplierGain: 0.25
     )

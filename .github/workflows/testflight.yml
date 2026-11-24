@@ -1,0 +1,87 @@
+name: Roomwave TestFlight pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      export_ipa:
+        description: Export a signed pilot after native validation
+        type: boolean
+        default: false
+      upload:
+        description: Upload Roomwave beta to the authorized existing Molecule Foundry app
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roomwave-testflight
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Select stable Xcode 27.2
+        run: bash scripts/release/select-xcode.sh
+      - name: Install project generator
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+      - name: Validate shared rules and native asset/photo paths
+        run: bash scripts/release/validate-native.sh
+        env:
+          DEFER_ARCHIVE_TO_SIGNED_RELEASE: ${{ inputs.export_ipa || inputs.upload }}
+      - name: Preserve native validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Roomwave-validation-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/release/*.log
+            build/release/NativeTests.xcresult
+            build/release/unsigned-archive-identity.json
+            build/release/UnsignedRoomwave.xcarchive.zip
+  release:
+    needs: validate
+    if: github.ref == 'refs/heads/main' && (inputs.export_ipa || inputs.upload)
+    runs-on: xcode-27
+    timeout-minutes: 45
+    environment: testflight
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Select stable Xcode 27.2
+        run: bash scripts/release/select-xcode.sh
+      - name: Install project generator
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+      - name: Sign, verify, export and optionally upload
+        run: bash scripts/release/export-ios.sh
+        env:
+          DEVELOPMENT_TEAM: ${{ vars.DEVELOPMENT_TEAM }}
+          PRODUCT_BUNDLE_IDENTIFIER: ${{ vars.PRODUCT_BUNDLE_IDENTIFIER }}
+          PROVISIONING_PROFILE_NAME: ${{ vars.PROVISIONING_PROFILE_NAME }}
+          APP_STORE_APP_ID: ${{ vars.APP_STORE_APP_ID }}
+          ASC_KEY_ID: ${{ vars.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
+          APPLE_DISTRIBUTION_P12_BASE64: ${{ secrets.APPLE_DISTRIBUTION_P12_BASE64 }}
+          APPLE_DISTRIBUTION_P12_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_P12_PASSWORD }}
+          APP_STORE_PROFILE_BASE64: ${{ secrets.APP_STORE_PROFILE_BASE64 }}
+          ASC_PRIVATE_KEY_P8_BASE64: ${{ secrets.ASC_PRIVATE_KEY_P8_BASE64 }}
+          UPLOAD_TO_TESTFLIGHT: ${{ inputs.upload }}
+      - name: Preserve release receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Roomwave-release-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/release/*.json
+            build/release/*.log

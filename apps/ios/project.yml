@@ -1,0 +1,64 @@
+name: Roomwave
+options:
+  deploymentTarget:
+    iOS: "27.0"
+  createIntermediateGroups: true
+packages:
+  RoomwaveCore:
+    path: ../..
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Roomwave:
+    type: application
+    platform: iOS
+    deploymentTarget: "27.0"
+    sources:
+      - path: Roomwave
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.timelabs.moleculefoundry
+        PRODUCT_NAME: Roomwave
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Roomwave/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - package: RoomwaveCore
+        product: RoomwaveCore
+  RoomwaveNativeTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "27.0"
+    sources:
+      - path: RoomwaveNativeTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.timelabs.moleculefoundry.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Roomwave.app/Roomwave"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    dependencies:
+      - target: Roomwave
+      - package: RoomwaveCore
+        product: RoomwaveCore
+schemes:
+  Roomwave:
+    build:
+      targets:
+        Roomwave: all
+        RoomwaveNativeTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: RoomwaveNativeTests
+          parallelizable: false

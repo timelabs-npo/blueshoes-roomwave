@@ -1,0 +1,12 @@
+{
+  "source": "Blender render of the CC0 Roomwave-derived pilot character",
+  "width": 1024,
+  "height": 1024,
+  "png_color_type": 2,
+  "alpha": false,
+  "sha256": "e47f1deea890ef9d2979758fd410d1d256f5c9b27dc1bc823fe39dc0c9b89838",
+  "bytes": 1527248,
+  "license": "CC0-1.0",
+  "build_setting_required": "ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon",
+  "visual_review": "Rendered image inspected; initial pilot artwork, not final art direction."
+}

@@ -17,3 +17,5 @@ xcuserdata/
 ops/
 logs/
 *.jsonl
+.derivedData/
+apps/ios/Roomwave.xcodeproj/
