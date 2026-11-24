@@ -1,0 +1,66 @@
+{
+  "upstream_author": "Quaternius",
+  "upstream_pack": "Universal Base Characters Standard (free edition)",
+  "source_page": "https://quaternius.com/packs/universalbasecharacters.html",
+  "download_page": "https://quaternius.itch.io/universal-base-characters",
+  "downloaded_utc": "2026-11-24",
+  "license": "CC0-1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "upstream_archive_name": "Universal Base Characters[Standard].zip",
+  "archive_sha256": "fdbf1804c90dfc1ea03e992bff7da2dfd1a79318e13270a660180f9308455f40",
+  "archive_bytes": 128968391,
+  "selected_model": "Superhero_Male_FullBody",
+  "source_files": [
+    {
+      "path": "License_Standard.txt",
+      "sha256": "0f4beaf0fe360a7732e58bbe3dbf60a2422367fbea60cb9ea4add968f383268e",
+      "bytes": 806
+    },
+    {
+      "path": "Superhero_Male_FullBody.gltf",
+      "sha256": "e7fcea214ecf8855afbf910b50de6f9c7d1decfb71ca28bad8a4481452dafeb4",
+      "bytes": 30989
+    },
+    {
+      "path": "Superhero_Male_FullBody.bin",
+      "sha256": "459003f9745853ae562a85506a2b94dd56515c1f37728f9fa3d2ce1a3e4cd92f",
+      "bytes": 720076
+    }
+  ],
+  "modifications": [
+    "Original base skin, eyebrows, eyes and humanoid rig are from Quaternius.",
+    "Flat neon materials replace upstream image textures; upstream texture files are not shipped.",
+    "Outer jacket, boots, gauntlets and emblem are derived from or attached to the free base mesh.",
+    "A project-authored cape mesh and coat-tail joint were added.",
+    "SkeletonOverlay and MuscleOverlay are project-authored stylized rigid-weighted helpers, not authentic anatomical bones, muscles, soft-body physics or physiological simulation.",
+    "Project-authored RoomwaveGlide animation drives the shared rig for 2 seconds.",
+    "Geometry transformed to Y up, -Z forward, approximately one metre rest height."
+  ],
+  "derived_asset_license": "CC0-1.0",
+  "code_license": "MIT",
+  "runtime": {
+    "format": "USDZ/UsdSkel",
+    "height_metres_rest": 1.0,
+    "up": "Y",
+    "forward": "-Z",
+    "layers": [
+      "Skin",
+      "Coat",
+      "SkeletonOverlay",
+      "MuscleOverlay"
+    ],
+    "joints": 66,
+    "skinned_meshes": 36,
+    "triangles": 22912,
+    "animation": {
+      "name": "RoomwaveGlide",
+      "duration_seconds": 2,
+      "samples": 61,
+      "fps": 30
+    },
+    "sha256": "4cf89932ea8e4a1a19fa974606aa9b3aa843c618c84a7f7c26bed51db0ba2993",
+    "bytes": 606985,
+    "validation": "USD stage opened, topology validated, all meshes have skinned joint influences; Apple device playback not yet tested.",
+    "skinned_bounds_at_frames_0_15_30_60": "All samples finite, X approximately +/-0.48m, Y -0.005..1.029m, Z -0.090..0.215m. Loop endpoints 0 and60 agree."
+  }
+}
