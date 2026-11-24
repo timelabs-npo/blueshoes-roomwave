@@ -81,12 +81,23 @@ jobs:
           simulator_app=".derivedData/Build/Products/Debug-iphonesimulator/Roomwave.app"
           python3 scripts/release/verify-app.py "$simulator_app" --build 1 > build/pilot-artifacts/simulator-identity.json
           xcrun simctl install "$ROOMWAVE_SIMULATOR_ID" "$simulator_app"
-          xcrun simctl launch --terminate-running-process "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry --pilot-demo
-          sleep 5
+          app_data="$(xcrun simctl get_app_container "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry data)"
+          marker="$app_data/Library/Caches/RoomwavePilotReadiness.json"
+          xcrun simctl terminate "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry >/dev/null 2>&1 || true
+          rm -f "$marker"
+          launch_output="$(xcrun simctl launch "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry --pilot-demo)"
+          printf '%s\n' "$launch_output"
+          launch_pid="${launch_output##*: }"
+          python3 scripts/ci/wait-native-preview.py "$marker" preview --pid "$launch_pid" --output build/pilot-artifacts/demo-readiness.json
           xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/pilot-artifacts/Roomwave-demo.png
-          xcrun simctl launch --terminate-running-process "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry --pilot-race
-          sleep 4
+          xcrun simctl terminate "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry
+          rm -f "$marker"
+          launch_output="$(xcrun simctl launch "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry --pilot-race)"
+          printf '%s\n' "$launch_output"
+          launch_pid="${launch_output##*: }"
+          python3 scripts/ci/wait-native-preview.py "$marker" race --pid "$launch_pid" --output build/pilot-artifacts/race-readiness.json
           xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/pilot-artifacts/Roomwave-race.png
+          python3 scripts/ci/wait-native-preview.py "$marker" race --pid "$launch_pid" --output build/pilot-artifacts/race-readiness-after-capture.json
           ditto -c -k --keepParent "$simulator_app" build/pilot-artifacts/Roomwave-simulator.app.zip
           git rev-parse HEAD > build/pilot-artifacts/source-sha.txt
           xcrun simctl list devices "$ROOMWAVE_SIMULATOR_ID" > build/pilot-artifacts/simulator.txt

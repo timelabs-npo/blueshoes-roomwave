@@ -1,4 +1,5 @@
 import ARKit
+import Combine
 import RealityKit
 import RoomwaveCore
 import SwiftUI
@@ -18,6 +19,34 @@ struct RoomCapturePreview: UIViewRepresentable {
     func updateUIView(_ view: ARView, context: Context) {
         if view.session !== session { view.session = session }
     }
+}
+
+/// Keep UIKit status above ARView's internally managed render subviews.
+@MainActor
+final class TrackSceneView: UIView {
+    let arView: ARView
+
+    init(arView: ARView, status: UILabel) {
+        self.arView = arView
+        super.init(frame: .zero)
+        arView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(arView)
+        status.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(status)
+        NSLayoutConstraint.activate([
+            arView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            arView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            arView.topAnchor.constraint(equalTo: topAnchor),
+            arView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            status.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 12),
+            status.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            status.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            status.heightAnchor.constraint(greaterThanOrEqualToConstant: 32)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("Use init(arView:status:)") }
 }
 
 /// Finalized game geometry, shown without a camera feed.
@@ -44,11 +73,81 @@ struct TrackScene: UIViewRepresentable {
         var overviewCenter = SIMD3<Float>.zero
         var overviewHeight: Float = 25
         var wasRacing = false
+        var disposed = false
+
+        static let layerNames = ["Skin", "Coat", "SkeletonOverlay", "MuscleOverlay"]
+        var renderableLayers: [String] {
+            Self.layerNames.filter { name in
+                guard let layer = avatar.root.findEntity(named: name) else { return false }
+                return containsModel(layer)
+            }
+        }
+        var fallbackPresent: Bool {
+            avatar.root.findEntity(named: "ProceduralFallback_NotBundledAvatar") != nil
+        }
+        private func containsModel(_ entity: Entity) -> Bool {
+            entity.components[ModelComponent.self] != nil || entity.children.contains { containsModel($0) }
+        }
+
+        #if DEBUG
+        var sceneUpdates: (any Cancellable)?
+        var loadCompleted = false
+        var updatesAfterLoad = 0
+        var snapshotRequested = false
+        var snapshotRendered = false
+        var snapshotFailed = false
+        var previewMode = "preview"
+        var proofGeneration = UUID()
+
+        func reportPreviewState() {
+            let glideLayers = Self.layerNames.filter { name in
+                avatar.root.findEntity(named: name)?.availableAnimations.contains {
+                    $0.name?.contains("/RoomwaveGlide[") == true
+                } == true
+            }
+            PilotPreviewProbe.record(
+                loadCompleted: loadCompleted, renderableLayers: renderableLayers,
+                fallbackPresent: fallbackPresent, glideLayers: glideLayers,
+                updatesAfterLoad: updatesAfterLoad, snapshotRendered: snapshotRendered,
+                snapshotFailed: snapshotFailed, mode: previewMode, loadStatus: avatar.assetStatus)
+        }
+
+        func resetRenderedProof() {
+            proofGeneration = UUID()
+            updatesAfterLoad = 0
+            snapshotRequested = false
+            snapshotRendered = false
+            snapshotFailed = false
+            reportPreviewState()
+        }
+
+        func observeSceneUpdate(_ view: ARView) {
+            guard !disposed else { return }
+            if !loadCompleted {
+                reportPreviewState()
+                return
+            }
+            guard renderableLayers.count == 4, !fallbackPresent else { return }
+            updatesAfterLoad = min(updatesAfterLoad + 1, 2)
+            guard updatesAfterLoad >= 2, !snapshotRequested else { return }
+            snapshotRequested = true
+            let generation = proofGeneration
+            view.snapshot(saveToHDR: false) { [weak self] frame in
+                let rendered = frame != nil
+                Task { @MainActor [weak self] in
+                    guard let self, !self.disposed, generation == self.proofGeneration else { return }
+                    self.snapshotRendered = rendered
+                    self.snapshotFailed = !rendered
+                    self.reportPreviewState()
+                }
+            }
+        }
+        #endif
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeUIView(context: Context) -> ARView {
+    func makeUIView(context: Context) -> TrackSceneView {
         let view = ARView(frame: .zero, cameraMode: .nonAR, automaticallyConfigureSession: false)
         view.environment.background = .color(UIColor(red: 0.025, green: 0.018, blue: 0.075, alpha: 1))
         view.environment.lighting.intensityExponent = 1
@@ -64,26 +163,34 @@ struct TrackScene: UIViewRepresentable {
         status.layer.cornerRadius = 8
         status.clipsToBounds = true
         status.isUserInteractionEnabled = false
-        status.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(status)
-        NSLayoutConstraint.activate([
-            status.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
-            status.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-            status.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
-            status.heightAnchor.constraint(greaterThanOrEqualToConstant: 32)
-        ])
+        let container = TrackSceneView(arView: view, status: status)
+        #if DEBUG
+        if PilotPreviewProbe.requested {
+            coordinator.reportPreviewState()
+            coordinator.sceneUpdates = view.scene.subscribe(to: SceneEvents.Update.self) { [weak coordinator, weak view] _ in
+                Task { @MainActor in
+                    guard let coordinator, let view else { return }
+                    coordinator.observeSceneUpdate(view)
+                }
+            }
+        }
+        #endif
         coordinator.loadTask = Task { [weak coordinator] in
             guard let coordinator else { return }
             await coordinator.avatar.loadBundledAsset()
             guard !Task.isCancelled else { return }
-            let loaded = coordinator.avatar.assetStatus.hasPrefix("Bundled RoomwavePilot.usdz loaded")
+            let loaded = coordinator.renderableLayers.count == 4 && !coordinator.fallbackPresent
             coordinator.riderStatus.isHidden = loaded
             coordinator.riderStatus.text = loaded ? nil : "Simplified rider — model unavailable"
+            #if DEBUG
+            coordinator.loadCompleted = true
+            coordinator.reportPreviewState()
+            #endif
         }
-        return view
+        return container
     }
 
-    func updateUIView(_ view: ARView, context: Context) {
+    func updateUIView(_ view: TrackSceneView, context: Context) {
         let coordinator = context.coordinator
         if coordinator.track != track {
             rebuild(coordinator)
@@ -118,13 +225,25 @@ struct TrackScene: UIViewRepresentable {
         coordinator.cameraPosition = cameraPosition
         coordinator.cameraTarget = cameraTarget
         coordinator.camera.look(at: cameraTarget, from: cameraPosition, relativeTo: nil)
+        #if DEBUG
+        let mode = race == nil ? "preview" : race?.status == .running ? "race" : "result"
+        if mode != coordinator.previewMode {
+            coordinator.previewMode = mode
+            coordinator.resetRenderedProof()
+        }
+        #endif
     }
 
-    static func dismantleUIView(_ view: ARView, coordinator: Coordinator) {
+    static func dismantleUIView(_ view: TrackSceneView, coordinator: Coordinator) {
+        coordinator.disposed = true
         coordinator.loadTask?.cancel()
         coordinator.loadTask = nil
+        #if DEBUG
+        coordinator.sceneUpdates?.cancel()
+        coordinator.sceneUpdates = nil
+        #endif
         coordinator.root.children.removeAll()
-        view.scene.anchors.removeAll()
+        view.arView.scene.anchors.removeAll()
     }
 
     private func rebuild(_ coordinator: Coordinator) {

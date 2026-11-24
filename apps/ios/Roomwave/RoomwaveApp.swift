@@ -13,11 +13,18 @@ struct RoomwaveApp: App {
                 .task {
                     let arguments = ProcessInfo.processInfo.arguments
                     guard arguments.contains("--pilot-demo") || arguments.contains("--pilot-race") else { return }
+                    PilotPreviewProbe.beginLaunch()
                     model.makeDemo()
                     if arguments.contains("--pilot-race") {
-                        try? await Task.sleep(for: .seconds(2))
-                        guard !Task.isCancelled else { return }
-                        model.startRace()
+                        // Start the ordinary race only after the real preview has rendered.
+                        for _ in 0..<450 {
+                            guard !Task.isCancelled, !PilotPreviewProbe.failed else { return }
+                            if PilotPreviewProbe.isReady {
+                                model.startRace()
+                                return
+                            }
+                            try? await Task.sleep(for: .milliseconds(100))
+                        }
                     }
                 }
                 #endif
