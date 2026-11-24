@@ -42,6 +42,8 @@ jobs:
           path: |
             build/release/*.log
             build/release/NativeTests.xcresult
+            build/release/unsigned-archive-identity.json
+            build/release/UnsignedRoomwave.xcarchive.zip
   release:
     needs: validate
     if: github.ref == 'refs/heads/main' && (inputs.export_ipa || inputs.upload)

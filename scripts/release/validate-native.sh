@@ -27,3 +27,12 @@ if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configura
   exit 1
 fi
 tail -n 45 build/release/native-test.log
+if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configuration Release \
+  -destination 'generic/platform=iOS' -archivePath build/release/UnsignedRoomwave.xcarchive \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=1 MARKETING_VERSION=0.1.0 \
+  archive > build/release/unsigned-archive.log 2>&1; then
+  tail -n 120 build/release/unsigned-archive.log
+  exit 1
+fi
+python3 scripts/release/verify-app.py build/release/UnsignedRoomwave.xcarchive/Products/Applications/Roomwave.app --build 1 > build/release/unsigned-archive-identity.json
+ditto -c -k --keepParent build/release/UnsignedRoomwave.xcarchive build/release/UnsignedRoomwave.xcarchive.zip

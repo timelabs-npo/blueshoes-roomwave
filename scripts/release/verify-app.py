@@ -14,12 +14,16 @@ if args.path.suffix==".ipa":
         prefix=roots[0].removesuffix("Info.plist")
         model=any(n.startswith(prefix) and n.endswith("/RoomwavePilot.usdz") and archive.getinfo(n).file_size>0 for n in archive.namelist())
         catalog=prefix+"Assets.car" in archive.namelist()
+        privacy=plistlib.loads(archive.read(prefix+"PrivacyInfo.xcprivacy")) if prefix+"PrivacyInfo.xcprivacy" in archive.namelist() else None
 else:
     info=plistlib.loads((args.path/"Info.plist").read_bytes())
     model=any(x.stat().st_size>0 for x in args.path.rglob("RoomwavePilot.usdz"))
     catalog=(args.path/"Assets.car").is_file()
+    privacy=plistlib.loads((args.path/"PrivacyInfo.xcprivacy").read_bytes()) if (args.path/"PrivacyInfo.xcprivacy").is_file() else None
 for key,value in {"CFBundleIdentifier":"org.timelabs.blueshoes.roomwave","CFBundleShortVersionString":"0.1.0","CFBundleVersion":args.build}.items():
     if str(info.get(key))!=value: raise SystemExit("Compiled identity differs: "+key)
 if not model or not catalog: raise SystemExit("Pilot asset or compiled asset catalog missing")
 if info.get("ITSAppUsesNonExemptEncryption") is not False: raise SystemExit("Explicit encryption-compliance value is required")
-print(json.dumps({"bundle":"org.timelabs.blueshoes.roomwave","version":"0.1.0","build":args.build,"identity_verified":True,"pilot_asset_present":True,"asset_catalog_present":True}))
+if not privacy or privacy.get("NSPrivacyTracking") is not False or not any(x.get("NSPrivacyAccessedAPIType")=="NSPrivacyAccessedAPICategorySystemBootTime" and "35F9.1" in x.get("NSPrivacyAccessedAPITypeReasons",[]) for x in privacy.get("NSPrivacyAccessedAPITypes",[])):
+    raise SystemExit("Expected elapsed-time privacy manifest is missing")
+print(json.dumps({"bundle":"org.timelabs.blueshoes.roomwave","version":"0.1.0","build":args.build,"identity_verified":True,"pilot_asset_present":True,"asset_catalog_present":True,"privacy_manifest_verified":True}))

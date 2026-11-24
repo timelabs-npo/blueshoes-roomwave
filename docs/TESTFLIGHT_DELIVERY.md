@@ -18,7 +18,7 @@ The `testflight` environment is restricted to main and requires approval of the 
 
 An authorized Apple team administrator must register the exact explicit bundle above and issue an App Store Connect distribution profile using the existing valid team distribution certificate. The proposed app record is **Blueshoes Roomwave**, primary language English (U.S.), SKU `blueshoes-roomwave-pilot`.
 
-The API credential can read existing apps but has not been granted the required provisioning write operation. Do not retry through undocumented APIs or use another application's provisioning profile.
+The API credential can read existing apps, but the attempted provisioning write was denied. The response does not establish whether role scope, team policy or another account condition caused the denial. Do not retry through undocumented APIs or use another application's provisioning profile.
 
 After the app record and matching profile exist, set the three missing protected values. Verify the profile's application identifier equals the selected team plus the exact Roomwave bundle, is unexpired, contains the intended signing certificate, has no development devices, and has `get-task-allow=false`.
 
@@ -28,9 +28,9 @@ After the app record and matching profile exist, set the three missing protected
 - `export_ipa=true`: validate native paths, sign and export.
 - `upload=true`: also verify the numeric Apple app record and upload through Xcode's transporter tooling.
 
-Validation runs shared Swift tests and the real native simulator tests for photo import and the layered model. A core-only or OpenUSD-only pass does not establish RealityKit loading.
+Validation runs shared Swift tests and the real native simulator tests for photo import and the layered model, then creates an unsigned generic-device Release archive and verifies its actual bundle, model, icon catalog and elapsed-time privacy manifest. A core-only or OpenUSD-only pass does not establish RealityKit loading.
 
-The release job creates an ephemeral keychain, verifies the Apple-issued profile and compiled app identity, exports a signed IPA, and optionally uploads it. Secret material and the temporary keychain are removed on exit. Artifacts contain validation evidence and receipts; private signing material and the IPA are not published as repository artifacts.
+The release job creates an ephemeral keychain, verifies the Apple-issued profile and compiled app identity, exports a signed IPA, and optionally uploads it. Secret material and the temporary keychain are removed on exit; the previous keychain search list is restored. The selected signing certificate must be included in the profile. Artifacts contain validation evidence and receipts; private signing material and the IPA are not published as repository artifacts.
 
 Build numbers use the workflow run number and attempt. Receipts record the actual source commit, version, build, signature verification and IPA SHA-256. Apple's processing result is recorded separately with a bounded wait. Upload acceptance is not TestFlight availability.
 
