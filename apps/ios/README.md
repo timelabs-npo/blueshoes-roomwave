@@ -1,80 +1,38 @@
-# Roomwave native readiness shell
+# Roomwave native pilot
 
-Build status: **NOT VERIFIED**. This slice was authored on Windows; no Swift,
-Xcode, XcodeGen, simulator or physical-device execution was available.
+The app targets iOS **27.0**, Swift 6, and the local RoomwaveCore package. Development and CI use stable **Xcode 27.2** and XcodeGen. iPhone 18 Pro Max is the reference device.
 
-The XcodeGen target uses iOS **27.0**, Swift 6 and the local RoomwaveCore package
-at `../..`. An Xcode installation with an iOS 27 SDK and an already available
-XcodeGen are prerequisites. No dependencies were installed by this worker.
+The first successful native runtime gate is [CI run 45487555481](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45487555481) at commit `497445b`. It compiled and launched the app in an iOS simulator, loaded four renderable USDZ layers and animation resources, exercised independent layer visibility, and verified that two actual decoded images produce different valid tracks. Those results establish the tested code and asset behavior; signing and physical LiDAR quality have separate acceptance steps.
 
-On a suitable Mac, from the repository root:
+## Distribution identity
+
+The owner authorized the Roomwave pilot to use the existing MoleculeFoundry Apple app record: bundle `org.timelabs.moleculefoundry`, Apple app ID `6837899703`, team `398XACWZ7G`, beta version `0.2.0`. The product/module/display name remains Roomwave. Unsigned validation uses build 1; the protected release workflow assigns its own monotonically increasing build number. See [TestFlight delivery](../../docs/TESTFLIGHT_DELIVERY.md) for the actual release gates.
+
+## Build and verify
+
+From the repository root on a suitable Mac:
 
 ```sh
-cd apps/ios
-xcodegen generate --spec project.yml
-xcodebuild -project Roomwave.xcodeproj -scheme Roomwave \
+swift test
+xcodegen generate --spec apps/ios/project.yml --project apps/ios
+xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave \
   -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-  CODE_SIGNING_ALLOWED=NO build
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
 ```
 
-These commands are expected checks, **not executed results**. Use a locally
-selected signing team for a physical-device build; no team or credentials are
-included. The core scan/race implementations must be integrated at their frozen
-signatures. A generated project alone is not an app build or acceptance result.
+The unsigned CI workflow also runs the hosted native tests on an available iOS 27 iPhone simulator, captures actual demo/race screenshots, verifies the compiled identity/privacy/resources, and creates an unsigned generic iOS Release archive. Its visible artifact directories are `build/native-test-results` and `build/pilot-artifacts`. An unsigned archive still needs valid signing before installation on a physical iPhone or distribution through TestFlight.
 
 ## App flow
 
-- **SYNTHETIC demo** uses 128 invented points and remains `.synthetic` through
-  generation/export. It needs no camera permission or LiDAR.
-- **Start device capture** checks world-tracking/mesh capability, then requests
-  camera access. Unsupported devices have a disabled capture action; denial
-  leaves the demo usable. There is no camera feed UI or recording.
-- Capture polls the current AR frame four times per second for at most 20
-  seconds. At most 32 anchor snapshots, each with 64 evenly sampled vertices,
-  are copied. Each local vertex is multiplied by its anchor transform into the
-  same gravity-aligned session world frame. Only normal-tracking frames count.
-  This is coarse bounded sampling, not an accuracy or room-coverage claim.
-- Finish pauses ARSession before normalization/generation. Cancellation,
-  inactivity and background stop sampling and clear the app's raw-point buffer.
-  Permission requests are cancelled logically on background; no automatic
-  capture restart occurs. The ARKit origin label is client-reported, not attested.
-- A validated frozen track is shown as a non-AR RealityKit tabletop circuit.
-  Preview acceptance is required before racing. Drag one finger sideways to
-  steer; release centers. Orange bars mark gates. Bank sends a one-tick request
-  to the core. Crashes/finish and banked/chain score come from RaceSimulation.
-  No physics-engine scoring, social scoring or replay/clip recording is added.
-- The simple scheduler sleeps between fixed core ticks; wall-clock pacing,
-  render comfort and geometry alignment require device tests. Background stops
-  a race; the next run starts from the initial core state after preview.
-- **Review local challenge JSON** encodes only ChallengeDescriptor. A second
-  **Export reviewed JSON** action creates a protected temporary JSON file and
-  opens UIActivityViewController. The exact reviewed bytes are exported. The
-  app implements no remote destination; a destination chosen in the system
-  share sheet can send the file itself. Temporary exports are removed when the
-  activity sheet dismisses; interrupted process cleanup is left to iOS temp
-  storage. No raw ScanSample, anchor IDs or camera data enters this file.
+- **Photo:** PhotosPicker supplies real image bytes. ImageIO applies orientation and bounded downsampling; on-device Vision saliency plus contrast/edge features generate a `.photoDerived` stylized sample. Analysis does not upload, persist or export the source photograph or EXIF. It infers a map without claiming measured depth or room dimensions.
+- **LiDAR:** a supported device can show a live capture preview and sample its actual ARKit mesh. Capture is bounded to 20 seconds, 32 anchor snapshots and 64 sampled vertices per anchor. Local vertices are transformed into a shared gravity-aligned frame; stale or limited-tracking samples cannot silently become synthetic data. Capture stops and raw samples clear on cancellation/background.
+- **Demo:** 128 invented points remain explicitly `.synthetic` through track generation and export. No camera or photo permission is required.
+- **Race:** a validated frozen circuit previews before racing. A close camera follows the rider. Drag to counter bend pressure, release to stop steering, and arm Bank for the next gate. CADisplayLink feeds fixed simulation ticks; interrupted pacing stops a run explicitly. Haptics mark banking and the result.
+- **Rider:** the bundled CC0-derived humanoid has four independent rigged layer groups and authored glide animation. Skin and coat are enabled by default. Skeleton and muscle overlays are stylized animation helpers. Loading/fallback is identified in the scene if the real model cannot load.
+- **Export:** the user reviews final track geometry/rules before UIActivityViewController shares exactly those JSON bytes. Source photographs, raw mesh, anchor IDs and capture IDs are excluded. Temporary exports are removed when the share sheet dismisses.
 
-## Required acceptance on Mac/device
+## Physical-device acceptance still required
 
-1. Generate/build with the iOS 27 SDK. Resolve Swift 6 isolation/API diagnostics
-   in owned native files without changing shared contracts. Confirm camera
-   usage text survives project generation and local package resolves.
-2. Simulator/non-LiDAR: capture visibly disabled; demo can preview, steer, bank,
-   crash/finish and export with a permanent synthetic origin marker.
-3. LiDAR device: allow/deny/restricted permission, cancel during permission,
-   empty mesh, limited tracking, 20-second stop and manual finish. Observe
-   actual anchor transformations and bounded sample count; do not substitute
-   synthetic measurements when capture fails.
-4. Background/inactive during capture and race; background while permission is
-   pending. Confirm camera indicator stops, no delayed request restarts capture,
-   no partial raw sample can be exported, and race restarts only from preview.
-5. Visually compare core track path/width/gates and player distance/offset in
-   RealityKit. Check one-finger comfort, release-centering, one-tick Bank gate
-   semantics and terminal scores. This renderer is not a reachability proof.
-6. On iPhone and iPad, inspect reviewed JSON and exported JSON for exact bytes,
-   identity, rules and provenance. Check absence of captureID/raw points/frames;
-   cancel/reopen share, popover presentation, file cleanup and locked-device
-   file protection. Review derived-geometry privacy before choosing a destination.
+Exercise LiDAR coverage, allow/deny/restricted camera access, cancellation during the permission dialog, empty mesh, limited tracking, manual/automatic capture completion, and background transitions on an actual supported iPhone. Inspect steering comfort, camera motion, haptics, frame-rate and thermal behavior. Test reviewed/exported bytes and system sharing on iPhone and iPad.
 
-Public challenge URLs, uploads, OAuth/X/HF integration, replay verification,
-video capture, remote attestation and distribution are outside this slice.
+The DEBUG-only launch arguments `--pilot-demo` and `--pilot-race` exercise the normal app paths for CI screenshots. They are absent from Release builds. Public challenge hosting, X OAuth/API, video capture and server-side score verification remain future work.

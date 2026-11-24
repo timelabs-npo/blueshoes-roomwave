@@ -28,6 +28,19 @@ Shared gameplay and geometry live in Sources/RoomwaveCore. Native code lives in 
 The unsigned workflow separately checks the core, native build and simulator tests. A successful simulator result cannot establish LiDAR quality, frame-rate or thermal behavior on an iPhone.
 Signing and TestFlight delivery use protected release configuration, never checked-in credentials.
 
+## TestFlight identity
+
+The owner has authorized this Roomwave pilot to use the existing **MoleculeFoundry** Apple app record.
+
+| Setting | Pilot value |
+|---|---|
+| Bundle identifier | `org.timelabs.moleculefoundry` |
+| Apple app ID | `6837899703` |
+| Developer team | `398XACWZ7G` |
+| Beta version | `0.2.0` |
+
+The native product and its display name remain Roomwave. Signed delivery is controlled by the protected TestFlight workflow; successful upload, Apple processing and tester availability must each be verified for the actual build. See [delivery instructions](docs/TESTFLIGHT_DELIVERY.md).
+
 ## Design and verification
 
 - [Product brief](docs/PRODUCT_BRIEF_RU.md)

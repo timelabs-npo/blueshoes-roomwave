@@ -81,10 +81,10 @@ jobs:
           simulator_app=".derivedData/Build/Products/Debug-iphonesimulator/Roomwave.app"
           python3 scripts/release/verify-app.py "$simulator_app" --build 1 > build/pilot-artifacts/simulator-identity.json
           xcrun simctl install "$ROOMWAVE_SIMULATOR_ID" "$simulator_app"
-          xcrun simctl launch --terminate-running-process "$ROOMWAVE_SIMULATOR_ID" org.timelabs.blueshoes.roomwave --pilot-demo
+          xcrun simctl launch --terminate-running-process "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry --pilot-demo
           sleep 5
           xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/pilot-artifacts/Roomwave-demo.png
-          xcrun simctl launch --terminate-running-process "$ROOMWAVE_SIMULATOR_ID" org.timelabs.blueshoes.roomwave --pilot-race
+          xcrun simctl launch --terminate-running-process "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry --pilot-race
           sleep 4
           xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/pilot-artifacts/Roomwave-race.png
           ditto -c -k --keepParent "$simulator_app" build/pilot-artifacts/Roomwave-simulator.app.zip
@@ -100,7 +100,7 @@ jobs:
             -configuration Release -destination 'generic/platform=iOS' \
             -archivePath build/UnsignedRoomwave.xcarchive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            CURRENT_PROJECT_VERSION=1 MARKETING_VERSION=0.1.0 archive \
+            CURRENT_PROJECT_VERSION=1 MARKETING_VERSION=0.2.0 archive \
             > build/pilot-artifacts/unsigned-archive.log 2>&1; then
             tail -n 120 build/pilot-artifacts/unsigned-archive.log
             exit 1
