@@ -1,0 +1,38 @@
+name: Roomwave
+options:
+  deploymentTarget:
+    iOS: "27.0"
+  createIntermediateGroups: true
+packages:
+  RoomwaveCore:
+    path: ../..
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  Roomwave:
+    type: application
+    platform: iOS
+    deploymentTarget: "27.0"
+    sources:
+      - path: Roomwave
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.blueshoes.roomwave
+        PRODUCT_NAME: Roomwave
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Roomwave/Info.plist
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - package: RoomwaveCore
+        product: RoomwaveCore
+schemes:
+  Roomwave:
+    build:
+      targets:
+        Roomwave: all
+    run:
+      config: Debug
