@@ -4,6 +4,7 @@ import Combine
 import Foundation
 import RoomwaveCore
 import UIKit
+import QuartzCore
 import simd
 
 struct ChallengeReview: Identifiable {
@@ -14,20 +15,28 @@ struct ChallengeReview: Identifiable {
 
 @MainActor
 final class RoomwaveModel: ObservableObject {
-    enum Phase { case idle, requestingCamera, capturing, preview, racing, result }
+    enum Phase { case idle, requestingCamera, capturing, analyzingPhoto, preview, racing, result }
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var track: TrackDefinition?
     @Published private(set) var race: RaceState?
-    @Published private(set) var message = "Choose an invented demo or explicitly start a device capture."
+    @Published private(set) var message = "Try the demo, turn a photo into a map, or scan a space."
     @Published private(set) var sampleCount = 0
     @Published var review: ChallengeReview?
     @Published var steering = 0.0
     @Published private(set) var bankArmed = false
+    @Published var avatarSkeleton = false
+    @Published var avatarMuscle = false
+    @Published var avatarSkin = true
+    @Published var avatarCoat = true
 
     private let session = ARSession()
     private var captureTask: Task<Void, Never>?
-    private var raceTask: Task<Void, Never>?
+    private let raceClock = RoomwaveDisplayClock()
+    private var lastDisplayTimestamp: TimeInterval?
+    private var accumulatedTime = 0.0
+    private let bankFeedback = UIImpactFeedbackGenerator(style: .light)
+    private let resultFeedback = UINotificationFeedbackGenerator()
     private var operation = UUID()
     private var meshPoints: [UUID: [Vector3]] = [:]
     private var lastProcessedFrameTimestamp: TimeInterval?
@@ -36,6 +45,8 @@ final class RoomwaveModel: ObservableObject {
     private let maxAnchors = 32
     private let maxVerticesPerAnchor = 64
 
+    var captureSession: ARSession { session }
+
     var supportsCapture: Bool {
         ARWorldTrackingConfiguration.isSupported &&
         ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
@@ -43,9 +54,10 @@ final class RoomwaveModel: ObservableObject {
 
     var sourceLabel: String {
         switch track?.source {
-        case .synthetic: "SYNTHETIC DEMO — invented points"
-        case .arkitMesh: "DEVICE MESH — client-reported ARKit origin"
-        case nil: phase == .capturing ? "LIVE DEVICE CAPTURE — local only" : "NO CAPTURE"
+        case .synthetic: "DEMO TRACK"
+        case .arkitMesh: "LIDAR TRACK"
+        case .photoDerived: "PHOTO MAP — STYLISED"
+        case nil: phase == .capturing ? "SCANNING" : "ROOMWAVE PILOT"
         }
     }
 
@@ -58,6 +70,29 @@ final class RoomwaveModel: ObservableObject {
                            z: 2 * sin(angle))
         }
         freeze(ScanSample(captureID: "synthetic-demo", source: .synthetic, points: points))
+    }
+
+    func importPhotoData(_ data: Data) async {
+        reset()
+        guard !data.isEmpty, data.count <= 30 * 1024 * 1024 else {
+            message = "Choose a photo smaller than 30 MB."
+            return
+        }
+        let token = operation
+        phase = .analyzingPhoto
+        message = "Finding shapes, contrast and edges on this iPhone…"
+        do {
+            let sample = try await PhotoMapImporter.sample(from: data)
+            guard token == operation, phase == .analyzingPhoto else { return }
+            guard sample.source == .photoDerived else {
+                throw RoomwaveError.invalidScan("Photo analysis returned an incorrect origin")
+            }
+            freeze(sample)
+        } catch {
+            guard token == operation, phase == .analyzingPhoto else { return }
+            phase = .idle
+            message = "This photo could not form a map. Try a picture with clearer contrasting shapes. \(error)"
+        }
     }
 
     func startCapture() async {
@@ -97,7 +132,7 @@ final class RoomwaveModel: ObservableObject {
         lastProcessedFrameTimestamp = session.currentFrame?.timestamp
         session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
         phase = .capturing
-        message = "Move the device slowly while staying in a safe position. Collecting at most 2,048 vertices for 20 seconds; no camera preview or recording."
+        message = "Move slowly around a few large shapes. The scan stays on this iPhone. Finish when the scene is clear."
         captureTask = Task { [weak self] in
             for _ in 0..<80 {
                 do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
@@ -149,7 +184,7 @@ final class RoomwaveModel: ObservableObject {
             lastAcceptedAtUptime = ProcessInfo.processInfo.systemUptime
         }
         sampleCount = meshPoints.values.reduce(0) { $0 + $1.count }
-        message = "Device capture active: \(sampleCount) sampled vertices. Finish stops the camera before generating a route."
+        message = "Scanning shapes… \(sampleCount) points collected. Finish to turn this space into a track."
     }
 
     func finishCapture() {
@@ -201,7 +236,9 @@ final class RoomwaveModel: ObservableObject {
             }
             track = generated
             phase = .preview
-            message = "Capture stopped. Frozen stylized route ready for review. Race seated or standing still."
+            message = sample.source == .photoDerived
+                ? "Your photo has become a stylised map. Preview it, then ride."
+                : "Your track is ready. Preview the turns, then ride."
         } catch {
             track = nil
             phase = .idle
@@ -216,34 +253,71 @@ final class RoomwaveModel: ObservableObject {
             race = try RaceSimulation.initialState(rules: track.rules)
             steering = 0
             bankArmed = false
+            accumulatedTime = 0
+            lastDisplayTimestamp = nil
             phase = .racing
-            message = "Drag one finger left/right. Arm Bank to save the chain at the next gate; tap again to cancel."
-            raceTask = Task { [weak self] in
-                while !Task.isCancelled {
-                    do {
-                        try await Task.sleep(for: .seconds(1.0 / Double(track.rules.tickRate)))
-                    } catch { return }
-                    guard let self, self.phase == .racing, let state = self.race else { return }
-                    do {
-                        let input = RaceInput(tick: state.tick + 1, steering: self.steering, bank: self.bankArmed)
-                        let next = try RaceSimulation.step(state: state, input: input, track: track)
-                        self.race = next
-                        if self.bankArmed && next.bankedScore > state.bankedScore { self.bankArmed = false }
-                        if next.status != .running {
-                            self.bankArmed = false
-                            self.phase = .result
-                            self.message = "Run \(next.status.rawValue). Score comes only from core race state."
-                            return
-                        }
-                    } catch {
-                        self.bankArmed = false
-                        self.phase = .preview
-                        self.message = "Race stopped: \(error)"
-                        return
-                    }
-                }
+            bankFeedback.prepare()
+            resultFeedback.prepare()
+            message = "Steer against the turn. Arm Bank to save your chain at the next gate."
+            raceClock.start { [weak self] timestamp in
+                self?.advanceRace(at: timestamp)
             }
         } catch { message = "Race unavailable: \(error)" }
+    }
+
+    private func advanceRace(at timestamp: TimeInterval) {
+        guard phase == .racing, let track else { return }
+        guard let previous = lastDisplayTimestamp else {
+            lastDisplayTimestamp = timestamp
+            return
+        }
+        lastDisplayTimestamp = timestamp
+        let elapsed = timestamp - previous
+        // An interrupted frame timeline must not silently slow competitive time.
+        guard elapsed.isFinite, elapsed >= 0, elapsed <= 0.5 else {
+            stopForInactivity()
+            message = "The run was interrupted. Restart from the same track."
+            return
+        }
+        accumulatedTime += elapsed
+        let dt = 1.0 / Double(track.rules.tickRate)
+        let maximumCatchUpTicks = max(1, track.rules.tickRate / 2 + 1)
+        var ticks = 0
+        while accumulatedTime >= dt, phase == .racing, let state = race {
+            guard ticks < maximumCatchUpTicks else {
+                stopForInactivity()
+                message = "The run paused after a long frame. Restart when the device is ready."
+                return
+            }
+            do {
+                let input = RaceInput(tick: state.tick + 1, steering: steering, bank: bankArmed)
+                let next = try RaceSimulation.step(state: state, input: input, track: track)
+                race = next
+                accumulatedTime -= dt
+                ticks += 1
+                if bankArmed && next.bankedScore > state.bankedScore {
+                    bankArmed = false
+                    bankFeedback.impactOccurred(intensity: 0.7)
+                    bankFeedback.prepare()
+                }
+                if next.status != .running {
+                    raceClock.stop()
+                    bankArmed = false
+                    phase = .result
+                    message = next.status == .finished
+                        ? "Run complete. Can you bank more on the next ride?"
+                        : "Off the edge. Learn the turn and try again."
+                    resultFeedback.notificationOccurred(next.status == .finished ? .success : .warning)
+                    return
+                }
+            } catch {
+                raceClock.stop()
+                bankArmed = false
+                phase = .preview
+                message = "Race stopped: \(error)"
+                return
+            }
+        }
     }
 
     func bank() {
@@ -264,9 +338,10 @@ final class RoomwaveModel: ObservableObject {
     func stopForInactivity() {
         operation = UUID()
         captureTask?.cancel()
-        raceTask?.cancel()
+        raceClock.stop()
         captureTask = nil
-        raceTask = nil
+        lastDisplayTimestamp = nil
+        accumulatedTime = 0
         session.pause()
         meshPoints.removeAll()
         lastProcessedFrameTimestamp = nil
@@ -275,7 +350,7 @@ final class RoomwaveModel: ObservableObject {
         sampleCount = 0
         steering = 0
         bankArmed = false
-        if phase == .capturing || phase == .requestingCamera {
+        if phase == .capturing || phase == .requestingCamera || phase == .analyzingPhoto {
             phase = .idle
             message = "Capture stopped on inactivity; local raw samples discarded. Start explicitly to capture again."
         } else if phase == .racing {
@@ -291,5 +366,29 @@ final class RoomwaveModel: ObservableObject {
         race = nil
         review = nil
         phase = .idle
+    }
+}
+@MainActor
+private final class RoomwaveDisplayClock: NSObject {
+    private var displayLink: CADisplayLink?
+    private var onFrame: (@MainActor (TimeInterval) -> Void)?
+
+    func start(_ onFrame: @escaping @MainActor (TimeInterval) -> Void) {
+        stop()
+        self.onFrame = onFrame
+        let link = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 60)
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    func stop() {
+        displayLink?.invalidate()
+        displayLink = nil
+        onFrame = nil
+    }
+
+    @objc private func frame(_ link: CADisplayLink) {
+        onFrame?(link.timestamp)
     }
 }
