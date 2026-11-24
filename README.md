@@ -2,7 +2,7 @@
 
 An early native iOS game research project: scan a small space, turn its coarse shape into a stylized racing circuit, and share an equal-rules challenge.
 
-**Status: contracts and parallel implementation in progress. No iOS build, physical LiDAR capture, gameplay acceptance, TestFlight delivery, or live X integration is verified.**
+**Status: structural first slice from three completed Codex turns, proposed on a draft integration branch. No iOS build, physical LiDAR capture, gameplay acceptance, TestFlight delivery, or live X integration is verified yet.**
 
 - Target: iOS 27, SwiftUI, ARKit scene reconstruction, RealityKit.
 - Core: Swift 6 package; scan normalization, bounded track generation, deterministic custom racing state and replay contracts.
@@ -11,6 +11,8 @@ An early native iOS game research project: scan a small space, turn its coarse s
 - RaceScore measures gameplay; CreatorReputation is separate. Social likes/reposts never improve race score.
 - X: user-initiated system sharing only in the first slice. No OAuth, API posting, scraping or engagement rewards.
 - Hugging Face: optional cosmetic/style tooling may be evaluated later. No remote inference, scan uploads or model downloads in this slice.
+
+The current route generator is an ellipse placeholder driven by coarse aspect ratio. Neutral steering follows the centerline automatically, so this slice is not yet a skill challenge. See [integration readiness](docs/INTEGRATION_READINESS.md) and the [sanitized swarm receipt](docs/SWARM_RUN.md).
 
 ## Layout
 

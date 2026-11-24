@@ -41,7 +41,7 @@ struct ContentView: View {
                             }
                             if model.phase == .racing {
                                 steeringPad
-                                Button("Bank") { model.bank() }.buttonStyle(.borderedProminent)
+                                Button(model.bankArmed ? "Cancel armed bank" : "Arm bank at next gate") { model.bank() }.buttonStyle(.borderedProminent)
                                 Button("Stop race") { model.stopForInactivity() }
                             } else {
                                 Text("Review the entire route before racing or exporting. Derived geometry may reveal aspects of a room.")
@@ -67,7 +67,7 @@ struct ContentView: View {
         GeometryReader { geometry in
             RoundedRectangle(cornerRadius: 12)
                 .fill(.teal.opacity(0.18))
-                .overlay(Text("Drag left / right to steer\nRelease to center").multilineTextAlignment(.center))
+                .overlay(Text("Drag left / right to steer\nRelease to stop steering").multilineTextAlignment(.center))
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
                     .onChanged { value in

@@ -1,0 +1,61 @@
+name: Unsigned iOS readiness
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unsigned-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  readiness:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Select stable Xcode 27.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          selected=""
+          for app in /Applications/Xcode_27.2.app /Applications/Xcode_27.2.0.app; do
+            if [ -d "$app/Contents/Developer" ]; then
+              version="$(DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version)"
+              if [ "$(printf '%s\n' "$version" | head -n 1)" = "Xcode 27.2" ]; then
+                selected="$app/Contents/Developer"
+                break
+              fi
+            fi
+          done
+          if [ -z "$selected" ]; then
+            echo "::error::Stable Xcode 27.2 was not found. Do not substitute a beta or Xcode 26."
+            ls -d /Applications/Xcode*.app 2>/dev/null || true
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$selected" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="$selected" xcodebuild -version
+          DEVELOPER_DIR="$selected" xcodebuild -showsdks
+          DEVELOPER_DIR="$selected" swift --version
+      - name: Test shared core
+        run: swift test --parallel
+      - name: Generate native project
+        working-directory: apps/ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v xcodegen
+          xcodegen --version
+          xcodegen generate --spec project.yml
+      - name: Build unsigned simulator app
+        working-directory: apps/ios
+        run: >-
+          xcodebuild -project Roomwave.xcodeproj -scheme Roomwave
+          -configuration Debug -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath ../../.derivedData
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build

@@ -15,7 +15,7 @@ ARKit's provenance marker is not remote attestation. The generated track must
 retain the input source, validate, and be previewed before racing or sharing.
 
 RealityKit draws the finalized closed circuit and a player; drag controls core
-steering and Bank submits a one-tick gate request. Banked/chain values come only
+steering and Bank stays armed until the next observed bank or explicit cancellation. Banked/chain values come only
 from RaceSimulation. No likes/reposts or networking affect race state.
 
 Sharing requires review then explicit export through UIActivityViewController.
@@ -61,3 +61,20 @@ empty device captures surface an error; they never fabricate device data.
 
 Expected Mac build commands and the concrete simulator/LiDAR/privacy test
 matrix are in `apps/ios/README.md`. No signing team or credential was added.
+
+## Coordinator integration corrections
+
+After all workers stopped, integration changed the bank control to remain armed
+across off-gate ticks and corrected the release label: release stops steering,
+not lateral offset. The current native renderer admits uniform-width routes only;
+the core can still validate/test varying widths.
+
+Mesh snapshots prune IDs absent from the current ARFrame. Only a strictly newer
+ARFrame.timestamp can refresh the accepted-sample observation time; the pre-run
+frame timestamp is excluded. Finish requires normal tracking and a newly accepted
+sample observed within two monotonic seconds. This local freshness heuristic is
+not coverage, ROI selection or a guarantee of camera capture latency. ARFrame and
+ProcessInfo epochs are not assumed identical. Owned point copies are cleared;
+ARSession.pause is not claimed to erase all framework-owned raw buffers.
+
+These source corrections remain uncompiled until actual CI/device evidence.

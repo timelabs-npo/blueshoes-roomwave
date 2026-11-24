@@ -23,13 +23,16 @@ final class RoomwaveModel: ObservableObject {
     @Published private(set) var sampleCount = 0
     @Published var review: ChallengeReview?
     @Published var steering = 0.0
+    @Published private(set) var bankArmed = false
 
     private let session = ARSession()
     private var captureTask: Task<Void, Never>?
     private var raceTask: Task<Void, Never>?
     private var operation = UUID()
     private var meshPoints: [UUID: [Vector3]] = [:]
-    private var bankRequested = false
+    private var lastProcessedFrameTimestamp: TimeInterval?
+    private var lastAcceptedFrameTimestamp: TimeInterval?
+    private var lastAcceptedAtUptime: TimeInterval?
     private let maxAnchors = 32
     private let maxVerticesPerAnchor = 64
 
@@ -90,6 +93,8 @@ final class RoomwaveModel: ObservableObject {
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravity
         configuration.sceneReconstruction = .mesh
+        // Do not treat a previous paused session frame as a new capture.
+        lastProcessedFrameTimestamp = session.currentFrame?.timestamp
         session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
         phase = .capturing
         message = "Move the device slowly while staying in a safe position. Collecting at most 2,048 vertices for 20 seconds; no camera preview or recording."
@@ -109,7 +114,13 @@ final class RoomwaveModel: ObservableObject {
             message = "Waiting for normal AR tracking. Finish may fail if too little mesh was observed."
             return
         }
-        for anchor in frame.anchors.compactMap({ $0 as? ARMeshAnchor }).prefix(maxAnchors) {
+        guard lastProcessedFrameTimestamp.map({ frame.timestamp > $0 }) ?? true else { return }
+        lastProcessedFrameTimestamp = frame.timestamp
+        let currentAnchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
+        let currentIDs = Set(currentAnchors.map(\.identifier))
+        meshPoints = meshPoints.filter { currentIDs.contains($0.key) }
+        var acceptedVertexCount = 0
+        for anchor in currentAnchors.prefix(maxAnchors) {
             guard meshPoints[anchor.identifier] != nil || meshPoints.count < maxAnchors else { continue }
             let vertices = anchor.geometry.vertices
             guard vertices.format == .float3, vertices.stride >= 12, vertices.count > 0 else { continue }
@@ -130,6 +141,12 @@ final class RoomwaveModel: ObservableObject {
                 points.append(Vector3(x: Double(world.x), y: Double(world.y), z: Double(world.z)))
             }
             meshPoints[anchor.identifier] = points
+            acceptedVertexCount += points.count
+        }
+        if acceptedVertexCount > 0 {
+            lastAcceptedFrameTimestamp = frame.timestamp
+            // Local observation age, without assuming ARFrame and uptime share an epoch.
+            lastAcceptedAtUptime = ProcessInfo.processInfo.systemUptime
         }
         sampleCount = meshPoints.values.reduce(0) { $0 + $1.count }
         message = "Device capture active: \(sampleCount) sampled vertices. Finish stops the camera before generating a route."
@@ -137,9 +154,27 @@ final class RoomwaveModel: ObservableObject {
 
     func finishCapture() {
         guard phase == .capturing else { return }
+        copyMeshSnapshot()
+        let frame = session.currentFrame
+        let trackingNormal: Bool
+        if let frame, case .normal = frame.camera.trackingState {
+            trackingNormal = true
+        } else {
+            trackingNormal = false
+        }
+        let acceptedAge = lastAcceptedAtUptime.map { ProcessInfo.processInfo.systemUptime - $0 }
         session.pause()
         captureTask?.cancel()
         captureTask = nil
+        // Freshness heuristic only; this is not room coverage or scan-quality proof.
+        guard trackingNormal,
+              let acceptedFrame = lastAcceptedFrameTimestamp,
+              let currentTimestamp = frame?.timestamp, currentTimestamp >= acceptedFrame,
+              let acceptedAge, acceptedAge >= 0, acceptedAge <= 2 else {
+            stopForInactivity()
+            message = "Capture was not fresh with normal tracking. Local sampled copies discarded. Please start a new scan."
+            return
+        }
         // Stable ordering within this local capture; IDs never enter the challenge.
         let points = meshPoints.keys.sorted { $0.uuidString < $1.uuidString }
             .flatMap { meshPoints[$0] ?? [] }
@@ -159,6 +194,11 @@ final class RoomwaveModel: ObservableObject {
             guard issues.isEmpty else {
                 throw RoomwaveError.invalidTrack(issues.map(\.message).joined(separator: "; "))
             }
+            // The current native road segments assume uniform widths.
+            guard let width = generated.points.first?.halfWidth,
+                  generated.points.allSatisfy({ $0.halfWidth == width }) else {
+                throw RoomwaveError.invalidTrack("Native preview currently requires a uniform-width route")
+            }
             track = generated
             phase = .preview
             message = "Capture stopped. Frozen stylized route ready for review. Race seated or standing still."
@@ -175,9 +215,9 @@ final class RoomwaveModel: ObservableObject {
         do {
             race = try RaceSimulation.initialState(rules: track.rules)
             steering = 0
-            bankRequested = false
+            bankArmed = false
             phase = .racing
-            message = "Drag one finger left/right. Bank applies only at a gate crossed on the next simulation tick."
+            message = "Drag one finger left/right. Arm Bank to save the chain at the next gate; tap again to cancel."
             raceTask = Task { [weak self] in
                 while !Task.isCancelled {
                     do {
@@ -185,16 +225,18 @@ final class RoomwaveModel: ObservableObject {
                     } catch { return }
                     guard let self, self.phase == .racing, let state = self.race else { return }
                     do {
-                        let input = RaceInput(tick: state.tick + 1, steering: self.steering, bank: self.bankRequested)
-                        self.bankRequested = false
+                        let input = RaceInput(tick: state.tick + 1, steering: self.steering, bank: self.bankArmed)
                         let next = try RaceSimulation.step(state: state, input: input, track: track)
                         self.race = next
+                        if self.bankArmed && next.bankedScore > state.bankedScore { self.bankArmed = false }
                         if next.status != .running {
+                            self.bankArmed = false
                             self.phase = .result
                             self.message = "Run \(next.status.rawValue). Score comes only from core race state."
                             return
                         }
                     } catch {
+                        self.bankArmed = false
                         self.phase = .preview
                         self.message = "Race stopped: \(error)"
                         return
@@ -205,7 +247,7 @@ final class RoomwaveModel: ObservableObject {
     }
 
     func bank() {
-        if phase == .racing { bankRequested = true }
+        if phase == .racing { bankArmed.toggle() }
     }
 
     func prepareReview() {
@@ -227,9 +269,12 @@ final class RoomwaveModel: ObservableObject {
         raceTask = nil
         session.pause()
         meshPoints.removeAll()
+        lastProcessedFrameTimestamp = nil
+        lastAcceptedFrameTimestamp = nil
+        lastAcceptedAtUptime = nil
         sampleCount = 0
         steering = 0
-        bankRequested = false
+        bankArmed = false
         if phase == .capturing || phase == .requestingCamera {
             phase = .idle
             message = "Capture stopped on inactivity; local raw samples discarded. Start explicitly to capture again."
