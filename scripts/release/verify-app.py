@@ -22,6 +22,15 @@ else:
     privacy=plistlib.loads((args.path/"PrivacyInfo.xcprivacy").read_bytes()) if (args.path/"PrivacyInfo.xcprivacy").is_file() else None
 for key,value in {"CFBundleIdentifier":"org.timelabs.moleculefoundry","CFBundleShortVersionString":"0.2.0","CFBundleVersion":args.build}.items():
     if str(info.get(key))!=value: raise SystemExit("Compiled identity differs: "+key)
+if 2 in info.get("UIDeviceFamily", []):
+    required_orientations = {
+        "UIInterfaceOrientationPortrait", "UIInterfaceOrientationPortraitUpsideDown",
+        "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight",
+    }
+    ipad_orientations = info.get("UISupportedInterfaceOrientations~ipad",
+                                 info.get("UISupportedInterfaceOrientations", []))
+    if not isinstance(ipad_orientations, list) or not required_orientations.issubset(ipad_orientations):
+        raise SystemExit("iPad multitasking requires all four interface orientations in the compiled app")
 if not model or not catalog: raise SystemExit("Pilot asset or compiled asset catalog missing")
 if info.get("ITSAppUsesNonExemptEncryption") is not False: raise SystemExit("Explicit encryption-compliance value is required")
 if not privacy or privacy.get("NSPrivacyTracking") is not False or not any(x.get("NSPrivacyAccessedAPIType")=="NSPrivacyAccessedAPICategorySystemBootTime" and "35F9.1" in x.get("NSPrivacyAccessedAPITypeReasons",[]) for x in privacy.get("NSPrivacyAccessedAPITypes",[])):
