@@ -49,12 +49,36 @@ The existing internal group has two testers and does not automatically receive e
 
 If Apple's processing is still pending when the bounded check ends, continue from the recorded exact build number; do not upload a duplicate binary merely to poll its status. Existing installations of the same bundle can be updated by this Roomwave beta, replacing the previous Molecule Foundry app content on those devices.
 
+## Released TestFlight pilot, 24 November 2026 UTC
+
+| Evidence | Confirmed result |
+| --- | --- |
+| Native app | Roomwave |
+| Existing Apple app / bundle | `6837899703` / `org.timelabs.moleculefoundry` |
+| Version and build | `0.2.0 (1002.1)` |
+| Apple build ID | `e61844d6-732b-4162-a27f-e7ee52c1a817` |
+| Source commit | `2d09b2484cd16ceea8ff9bbc85eca6318b94ade4` |
+| Release workflow | [45506909397](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45506909397), SUCCESS |
+| Validation | Core/native checks, signed archive, export and compiled identity verification passed |
+| Upload | Accepted |
+| Apple processing | VALID; independently observed 23:28 UTC |
+| Encryption compliance | `usesNonExemptEncryption=false` |
+| Expiration status | Not expired |
+| Internal group availability | `IN_BETA_TESTING`; exact build verified in Molecule Foundry Developers |
+| Existing testers | 2; selected account already present |
+| Build notes | `en-US` notes independently verified |
+| Final availability verification | 23:37:54 UTC |
+
+The earlier attempt `0.2.0 (1001.1)` was rejected during upload because its universal app declaration omitted an iPad multitasking orientation. The source above includes all required iPad orientations and verifies the compiled declaration. The accepted `1002.1` build is the pilot to use; no duplicate upload is needed.
+
+The TestFlight user-facing What to Test text uses the API attribute `whatsNew` on `betaBuildLocalizations`. The final Apple API receipt confirms group membership and internal availability. The selected tester record reports `INSTALLED`; that account-level state does not prove installation of this new build. No new testers or invitations were created, and App Store production metadata was unchanged.
+
 ## Requests after the exact build ID is verified
 
 An authorized operator performs these only for app `6837899703`, version `0.2.0`, and the recorded new build number:
 
 1. Read `GET /v1/builds/BUILD_ID?include=app,preReleaseVersion`. Require the expected app/bundle/version/build, `processingState=VALID`, `expired=false`, and `usesNonExemptEncryption=false`.
-2. Read `GET /v1/builds/BUILD_ID/betaBuildLocalizations`. If an `en-US` localization does not exist, create it with the payload below; otherwise update that existing localization's `whatToTest` field only.
+2. Read `GET /v1/builds/BUILD_ID/betaBuildLocalizations`. If an `en-US` localization does not exist, create it with the payload below; otherwise update that existing localization's `whatsNew` field only.
 3. Read `GET /v1/betaGroups/5a93cfb4-bd7c-4c0c-acbd-ade02816d8c1/app` and require app `6837899703`. Require the group to remain internal. Read its existing build relationships, then add the exact new build only if absent.
 4. Read `GET /v1/builds/BUILD_ID/buildBetaDetail` and the group's build relationship again. Confirm `internalBuildState=IN_BETA_TESTING`, resolved encryption compliance, and the build ID in the existing group. Confirm tester membership count without printing addresses. Do not claim a physical installation from API availability alone.
 
@@ -71,7 +95,7 @@ Content-Type: application/json
     "type": "betaBuildLocalizations",
     "attributes": {
       "locale": "en-US",
-      "whatToTest": "Roomwave pilot: import a photo to generate a stylized map, or start the synthetic demo. Photo conversion uses image features; it does not reconstruct measured depth. On a supported LiDAR device, test room capture and the generated course. Check the rider's skeleton, muscular, skin and coat layers and animation. Test steering, banking, collision and restart. Report frame-rate issues, unreadable obstacles or photo/capture failures."
+      "whatsNew": "Roomwave pilot: import a photo to generate a stylized map, or start the synthetic demo. Photo conversion uses image features; it does not reconstruct measured depth. On a supported LiDAR device, test room capture and the generated course. Check the rider's skeleton, muscular, skin and coat layers and animation. Test steering, banking, collision and restart. Report frame-rate issues, unreadable obstacles or photo/capture failures."
     },
     "relationships": { "build": { "data": { "type": "builds", "id": "BUILD_ID" } } }
   }
@@ -99,3 +123,5 @@ These requests update only build-specific test notes and existing-group access. 
 - https://developer.apple.com/documentation/appstoreconnectapi/internalbetastate
 
 - https://developer.apple.com/documentation/appstoreconnectapi/post-v1-betabuildlocalizations
+
+- https://developer.apple.com/documentation/appstoreconnectapi/betabuildlocalizationupdaterequest/data-data.dictionary/attributes-data.dictionary
