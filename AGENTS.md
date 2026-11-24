@@ -1,24 +1,14 @@
-# Blueshoes: Roomwave agent contract
+# Roomwave pilot parallel contract
+Scope: only the current Roomwave worktree. Other projects, credentials and host configuration are out of scope.
+This pilot replaces the first-slice ownership assignment with the coordinator-reviewed contract below, under the user's explicit request for a playable TestFlight pilot with photo maps and layered animation.
 
-Scope: only this new repository/worktree. Never alter existing Blueshoes networking, Rhea, WORLD.EXE, Molecule Foundry, other worktrees, host configuration, credentials or permissions.
+Read docs/PILOT_CONTRACTS.md and docs/CONTRACTS.md. Sources/RoomwaveCore/Contracts.swift and Package.swift are frozen after coordinator preparation. Do not duplicate types or change shared signatures.
+Ownership:
+- gameplay: Sources/RoomwaveCore/RaceSimulation.swift, TrackGenerator.swift, TrackValidator.swift; Tests/RoomwaveCoreTests/RaceTests.swift, ScanTests.swift, PilotGameplayTests.swift; docs/PILOT_GAMEPLAY.md.
+- photo: Sources/RoomwaveCore/PhotoMapAnalyzer.swift; Tests/RoomwaveCoreTests/PhotoMapTests.swift; apps/ios/Roomwave/PhotoMapImporter.swift; docs/PILOT_PHOTO.md.
+- avatar: apps/ios/Roomwave/LayeredAvatarController.swift; docs/PILOT_AVATAR.md.
+Coordinator integrates RoomwaveModel, ContentView, TrackScene, timing and artwork. Release coordinator owns .github, project.yml, Info.plist and signing. Asset coordinator owns Assets and license notices. Do not edit these concurrently.
 
-## Frozen interfaces
-
-Read docs/CONTRACTS.md before work. Sources/RoomwaveCore/Contracts.swift and Package.swift are frozen for this first parallel slice. Request coordinator review before changing a public type/signature. Do not duplicate shared types.
-
-## Ownership
-
-- scan lane: Normalization.swift, TrackGenerator.swift, TrackValidator.swift, TrackIdentity.swift; Tests/RoomwaveCoreTests/ScanTests.swift; Fixtures/scan/**; docs/SCAN_READINESS.md.
-- race lane: RaceSimulation.swift, Replay.swift; Tests/RoomwaveCoreTests/RaceTests.swift; docs/RACE_READINESS.md.
-- native lane: apps/ios/**; docs/NATIVE_READINESS.md.
-
-## Execution
-
-- One bounded task per worker; maximum 12 minutes, no recursive spawning, no background daemons or periodic retries.
-- Do not commit, push, merge, change branches, install packages, call remote AI, post messages, dispatch workflows or mutate external accounts.
-- No secrets, credential files, home-folder search or unrelated network/filesystem access. Do not weaken existing sandbox or approval rules.
-- Preserve synthetic versus device provenance. A client marker is not proof of remote attestation.
-- Share final stylized track geometry only; never raw LiDAR samples, room geometry, camera frames or local capture IDs.
-- Race score is independent of social popularity. HF and X networking remain unconnected.
-- Report exact executed checks and limitations. Windows without Swift/Xcode cannot establish an iOS build or device pass.
-- Leave concise lane readiness notes. Tests must verify behavior, invalid inputs and replay/provenance boundaries rather than mirror implementation.
+One bounded task, max20 minutes, no recursive spawning or daemons. Do not commit/push/merge/changebranches/installpackages/callremoteAI/postmessages/dispatchworkflows/mutateaccounts. No secrets or unrelated home-directory searches. Respect existing sandbox and approval controls.
+Preserve synthetic, arkitMesh and photoDerived provenance. A photo map is inferred stylized geometry, not calibrated depth or a measured reconstruction. Export final track only, never photos/raw mesh/captureIDs.
+Race scores depend on gameplay, not popularity. Report exactly executed verification; Windows withoutSwift/Xcode cannot prove iOS compilation or device operation. Leave concise lane notes and meaningful behavior tests.
