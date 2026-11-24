@@ -1,0 +1,25 @@
+{
+  "format": "USDZ/UsdSkel",
+  "height_metres_rest": 1.0,
+  "up": "Y",
+  "forward": "-Z",
+  "layers": [
+    "Skin",
+    "Coat",
+    "SkeletonOverlay",
+    "MuscleOverlay"
+  ],
+  "joints": 66,
+  "skinned_meshes": 36,
+  "triangles": 22912,
+  "animation": {
+    "name": "RoomwaveGlide",
+    "duration_seconds": 2,
+    "samples": 61,
+    "fps": 30
+  },
+  "sha256": "4cf89932ea8e4a1a19fa974606aa9b3aa843c618c84a7f7c26bed51db0ba2993",
+  "bytes": 606985,
+  "validation": "USD stage opened, topology validated, all meshes have skinned joint influences; Apple device playback not yet tested.",
+  "skinned_bounds_at_frames_0_15_30_60": "All samples finite, X approximately +/-0.48m, Y -0.005..1.029m, Z -0.090..0.215m. Loop endpoints 0 and60 agree."
+}
