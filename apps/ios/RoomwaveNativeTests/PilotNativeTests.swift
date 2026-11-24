@@ -87,7 +87,8 @@ final class PilotNativeTests: XCTestCase {
         guard depth < 32 else { return }
         let bounds = entity.visualBounds(relativeTo: nil).extents
         let components = String(describing: entity.components).prefix(400)
-        print("ASSET_TREE \(String(repeating: "  ", count: depth))\(entity.name) model=\(entity.components[ModelComponent.self] != nil) animations=\(entity.availableAnimations.count) bounds=\(bounds) components=\(components)")
+        let animationNames = entity.availableAnimations.map { $0.name ?? "<unnamed>" }
+        print("ASSET_TREE \(String(repeating: "  ", count: depth))\(entity.name) model=\(entity.components[ModelComponent.self] != nil) animations=\(entity.availableAnimations.count) names=\(animationNames) bounds=\(bounds) components=\(components)")
         for child in entity.children { reportEntityTree(child, depth: depth + 1) }
     }
 

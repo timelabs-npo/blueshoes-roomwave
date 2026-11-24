@@ -37,6 +37,7 @@ struct TrackScene: UIViewRepresentable {
         let root = AnchorEntity(world: .zero)
         let avatar = LayeredAvatarController()
         let camera = PerspectiveCamera()
+        let riderStatus = UILabel()
         var loadTask: Task<Void, Never>?
         var cameraPosition: SIMD3<Float>?
         var cameraTarget: SIMD3<Float>?
@@ -53,8 +54,31 @@ struct TrackScene: UIViewRepresentable {
         view.environment.lighting.intensityExponent = 1
         view.scene.addAnchor(context.coordinator.root)
         let coordinator = context.coordinator
+        let status = coordinator.riderStatus
+        status.text = "Loading rider…"
+        status.textColor = .white
+        status.font = .preferredFont(forTextStyle: .footnote)
+        status.textAlignment = .center
+        status.numberOfLines = 0
+        status.backgroundColor = UIColor.black.withAlphaComponent(0.75)
+        status.layer.cornerRadius = 8
+        status.clipsToBounds = true
+        status.isUserInteractionEnabled = false
+        status.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(status)
+        NSLayoutConstraint.activate([
+            status.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            status.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            status.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            status.heightAnchor.constraint(greaterThanOrEqualToConstant: 32)
+        ])
         coordinator.loadTask = Task { [weak coordinator] in
-            await coordinator?.avatar.loadBundledAsset()
+            guard let coordinator else { return }
+            await coordinator.avatar.loadBundledAsset()
+            guard !Task.isCancelled else { return }
+            let loaded = coordinator.avatar.assetStatus.hasPrefix("Bundled RoomwavePilot.usdz loaded")
+            coordinator.riderStatus.isHidden = loaded
+            coordinator.riderStatus.text = loaded ? nil : "Simplified rider — model unavailable"
         }
         return view
     }

@@ -41,7 +41,12 @@ public enum TrackGenerator {
         // Periodic low-pass filtering bounds local turns, including the seam.
         // Three [1,2,1]/4 passes retain broad features without tracing clutter.
         for _ in 0..<3 {
-            contour = (0..<8).map { (contour[($0 + 7) % 8] + 2 * contour[$0] + contour[($0 + 1) % 8]) / 4 }
+            contour = (0..<8).map { index -> Double in
+                let left: Double = contour[(index + 7) % 8]
+                let center: Double = 2.0 * contour[index]
+                let right: Double = contour[(index + 1) % 8]
+                return ((left + center) + right) / 4.0
+            }
         }
         var random = SplitMix64(state: seed)
         let rx = 18 * max(0.65, dx / largest) * (0.96 + 0.08 * random.unit())

@@ -14,7 +14,7 @@ concurrency:
 jobs:
   readiness:
     runs-on: xcode-27
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -72,6 +72,49 @@ jobs:
           -derivedDataPath ../../.derivedData
           -resultBundlePath ../../.test-results/RoomwaveNative.xcresult
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
+      - name: Capture the running simulator pilot
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/pilot-artifacts
+          simulator_app=".derivedData/Build/Products/Debug-iphonesimulator/Roomwave.app"
+          python3 scripts/release/verify-app.py "$simulator_app" --build 1 > build/pilot-artifacts/simulator-identity.json
+          xcrun simctl install "$ROOMWAVE_SIMULATOR_ID" "$simulator_app"
+          xcrun simctl launch --terminate-running-process "$ROOMWAVE_SIMULATOR_ID" org.timelabs.blueshoes.roomwave --pilot-demo
+          sleep 5
+          xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/pilot-artifacts/Roomwave-demo.png
+          xcrun simctl launch --terminate-running-process "$ROOMWAVE_SIMULATOR_ID" org.timelabs.blueshoes.roomwave --pilot-race
+          sleep 4
+          xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/pilot-artifacts/Roomwave-race.png
+          ditto -c -k --keepParent "$simulator_app" build/pilot-artifacts/Roomwave-simulator.app.zip
+          git rev-parse HEAD > build/pilot-artifacts/source-sha.txt
+          xcrun simctl list devices "$ROOMWAVE_SIMULATOR_ID" > build/pilot-artifacts/simulator.txt
+      - name: Archive the unsigned device Release pilot
+        timeout-minutes: 12
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/pilot-artifacts
+          if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath build/UnsignedRoomwave.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CURRENT_PROJECT_VERSION=1 MARKETING_VERSION=0.1.0 archive \
+            > build/pilot-artifacts/unsigned-archive.log 2>&1; then
+            tail -n 120 build/pilot-artifacts/unsigned-archive.log
+            exit 1
+          fi
+          python3 scripts/release/verify-app.py build/UnsignedRoomwave.xcarchive/Products/Applications/Roomwave.app --build 1 > build/pilot-artifacts/device-identity.json
+          ditto -c -k --keepParent build/UnsignedRoomwave.xcarchive build/pilot-artifacts/UnsignedRoomwave.xcarchive.zip
+      - name: Preserve runnable pilot and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomwave-pilot-artifacts
+          path: build/pilot-artifacts
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Preserve native test evidence
         if: always()
         uses: actions/upload-artifact@v4
