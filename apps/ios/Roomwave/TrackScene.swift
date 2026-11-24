@@ -97,6 +97,7 @@ struct TrackScene: UIViewRepresentable {
         var snapshotRendered = false
         var snapshotFailed = false
         var previewMode = "preview"
+        var raceTick = 0
         var proofGeneration = UUID()
 
         func reportPreviewState() {
@@ -132,12 +133,19 @@ struct TrackScene: UIViewRepresentable {
             guard updatesAfterLoad >= 2, !snapshotRequested else { return }
             snapshotRequested = true
             let generation = proofGeneration
+            let mode = previewMode
+            let requestTick = raceTick
             view.snapshot(saveToHDR: false) { [weak self] frame in
-                let rendered = frame != nil
+                let png = frame?.pngData()
                 Task { @MainActor [weak self] in
-                    guard let self, !self.disposed, generation == self.proofGeneration else { return }
-                    self.snapshotRendered = rendered
-                    self.snapshotFailed = !rendered
+                    guard let self, !self.disposed, generation == self.proofGeneration,
+                          mode == self.previewMode else { return }
+                    let saved = png.map {
+                        PilotPreviewProbe.saveSnapshot($0, mode: mode, generation: generation,
+                                                       requestTick: requestTick, captureTick: self.raceTick)
+                    } ?? false
+                    self.snapshotRendered = saved
+                    self.snapshotFailed = !saved
                     self.reportPreviewState()
                 }
             }
@@ -226,6 +234,7 @@ struct TrackScene: UIViewRepresentable {
         coordinator.cameraTarget = cameraTarget
         coordinator.camera.look(at: cameraTarget, from: cameraPosition, relativeTo: nil)
         #if DEBUG
+        coordinator.raceTick = Int(race?.tick ?? 0)
         let mode = race == nil ? "preview" : race?.status == .running ? "race" : "result"
         if mode != coordinator.previewMode {
             coordinator.previewMode = mode

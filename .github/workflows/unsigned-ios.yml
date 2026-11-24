@@ -82,22 +82,21 @@ jobs:
           python3 scripts/release/verify-app.py "$simulator_app" --build 1 > build/pilot-artifacts/simulator-identity.json
           xcrun simctl install "$ROOMWAVE_SIMULATOR_ID" "$simulator_app"
           app_data="$(xcrun simctl get_app_container "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry data)"
-          marker="$app_data/Library/Caches/RoomwavePilotReadiness.json"
+          capture_dir="$app_data/Library/Caches/RoomwavePilotCaptures"
           xcrun simctl terminate "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry >/dev/null 2>&1 || true
-          rm -f "$marker"
+          rm -f "$capture_dir/preview.json" "$capture_dir/race.json"
           launch_output="$(xcrun simctl launch "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry --pilot-demo)"
           printf '%s\n' "$launch_output"
           launch_pid="${launch_output##*: }"
-          python3 scripts/ci/wait-native-preview.py "$marker" preview --pid "$launch_pid" --output build/pilot-artifacts/demo-readiness.json
-          xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/pilot-artifacts/Roomwave-demo.png
+          python3 scripts/ci/wait-native-preview.py "$capture_dir/preview.json" preview --pid "$launch_pid" --output build/pilot-artifacts/demo-capture.json --image-output build/pilot-artifacts/Roomwave-demo-scene.png
           xcrun simctl terminate "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry
-          rm -f "$marker"
+          rm -f "$capture_dir/preview.json" "$capture_dir/race.json"
           launch_output="$(xcrun simctl launch "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry --pilot-race)"
           printf '%s\n' "$launch_output"
           launch_pid="${launch_output##*: }"
-          python3 scripts/ci/wait-native-preview.py "$marker" race --pid "$launch_pid" --output build/pilot-artifacts/race-readiness.json
-          xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/pilot-artifacts/Roomwave-race.png
-          python3 scripts/ci/wait-native-preview.py "$marker" race --pid "$launch_pid" --output build/pilot-artifacts/race-readiness-after-capture.json
+          python3 scripts/ci/wait-native-preview.py "$capture_dir/race.json" race --pid "$launch_pid" --output build/pilot-artifacts/race-capture.json --image-output build/pilot-artifacts/Roomwave-race-scene.png
+          # This later full UI capture may truthfully show the normal race result.
+          xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/pilot-artifacts/Roomwave-app-screen.png
           ditto -c -k --keepParent "$simulator_app" build/pilot-artifacts/Roomwave-simulator.app.zip
           git rev-parse HEAD > build/pilot-artifacts/source-sha.txt
           xcrun simctl list devices "$ROOMWAVE_SIMULATOR_ID" > build/pilot-artifacts/simulator.txt
