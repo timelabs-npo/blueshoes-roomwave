@@ -14,7 +14,7 @@ or noncommercial-only assets were used.
 | `Coat` | Project-derived jacket, boots and gauntlets, plus a new cape and emblem. |
 | `SkeletonOverlay` | Project-created stylized joint/bone helper geometry. |
 | `MuscleOverlay` | Project-created stylized muscle-shaped helper geometry. |
-| `skeletonRig` | The actual shared USD skeletal rig: Quaternius humanoid joints plus a project-created cape joint. |
+| `skeletonRig` | An equivalent rig within each layer: Quaternius humanoid joints plus a project-created cape joint. |
 
 The overlay shapes are **not anatomical skeleton/muscle models**. They do not
 simulate muscles, tissue or cloth physics. All four mesh layers use joint skinning;
@@ -22,10 +22,18 @@ the cape has a simple authored motion. These boundaries must remain visible in t
 pilot's layer inspector and documentation.
 
 The asset is Y-up, faces -Z, and has approximately 1 metre rest height. It contains
-66 joints, 36 skinned mesh parts and 22,912 triangles. `RoomwaveGlide` is a project-
+66 joints per layer, 36 skinned mesh parts and 22,912 triangles. `RoomwaveGlide` is a project-
 authored two-second loop, 61 samples at 30 fps. Use a parent entity for game-driven
 lean/hover. Toggle the four named layer containers recursively; skin and clothing
 normally occlude the internal helper layers. The runtime may default helpers off.
+
+Each named layer is its own `SkelRoot` under an ordinary top-level `Xform` and has
+an equivalent 66-joint skeleton and loop. A mesh is bound to only one skeleton.
+This avoids collecting all layers into the same skinned render entity. The first
+export used one shared `SkelRoot`; an actual iOS 27.2 simulator run preserved the
+four names but found no renderable components within those containers. That
+version failed the runtime gate. The revised layout requires the same native
+renderable-component and animation checks before release.
 
 ## Verification actually performed
 
@@ -37,6 +45,9 @@ normally occlude the internal helper layers. The runtime may default helpers off
 - Evaluated skinned vertices at loop samples 0, 15, 30 and 60; bounds were finite,
   approximately one metre high, and loop endpoints agreed.
 - Rendered the derived model for the opaque app icon and preview.
+- Ran the committed rebuild pipeline from the glTF/bin source snapshot: all
+  generated mesh/joint/animation data matched the source preparation output.
+- Rendered each layer independently; see `docs/previews` for actual isolated views.
 
 These checks do **not** establish RealityKit import, animation playback, frame rate
 or visual quality on an iPhone. Simulator/device asset loading is a separate gate.

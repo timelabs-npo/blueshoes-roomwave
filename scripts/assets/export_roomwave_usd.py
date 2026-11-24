@@ -8,11 +8,14 @@ OUT=ROOT/'build/character'; data=json.loads((OUT/'character_data.json').read_tex
 path=OUT/'RoomwavePilot.usdc';stage=Usd.Stage.CreateNew(str(path))
 UsdGeom.SetStageUpAxis(stage,UsdGeom.Tokens.y);UsdGeom.SetStageMetersPerUnit(stage,1.)
 stage.SetStartTimeCode(0);stage.SetEndTimeCode(60);stage.SetTimeCodesPerSecond(30);stage.SetFramesPerSecond(30)
-root=UsdSkel.Root.Define(stage,'/RoomwavePilot');stage.SetDefaultPrim(root.GetPrim())
+root=UsdGeom.Xform.Define(stage,'/RoomwavePilot');stage.SetDefaultPrim(root.GetPrim())
 root.GetPrim().SetMetadata('documentation','CC0 Quaternius base; Roomwave-derived clothing and stylized overlay helpers. Not anatomical or physiological simulation.')
 root.GetPrim().CreateAttribute('roomwave:forward',Sdf.ValueTypeNames.Token).Set('-Z')
-for group in ['Skin','Coat','SkeletonOverlay','MuscleOverlay']:
-    UsdGeom.Xform.Define(stage,'/RoomwavePilot/'+group)
+groups=['Skin','Coat','SkeletonOverlay','MuscleOverlay']
+Usd.ModelAPI(root).SetKind('assembly')
+for group in groups:
+    layer_root=UsdSkel.Root.Define(stage,'/RoomwavePilot/'+group)
+    Usd.ModelAPI(layer_root).SetKind('component')
 
 material_paths={}
 for name,rgba in data['materials'].items():
@@ -33,25 +36,35 @@ for b in data['bones']:
     name=Tf.MakeValidIdentifier(b['name'])
     bonepaths[b['name']]=(bonepaths[b['parent']]+'/' if b['parent'] else '')+name
 joints=Vt.TokenArray([bonepaths[b['name']] for b in data['bones']])
-skel=UsdSkel.Skeleton.Define(stage,'/RoomwavePilot/skeletonRig')
-skel.CreateJointsAttr(joints)
 bind=[matrix(b['bind']) for b in data['bones']]
 byname={b['name']:m for b,m in zip(data['bones'],bind)}
 rest=[m*byname[b['parent']].GetInverse() if b['parent'] else m for b,m in zip(data['bones'],bind)]
-skel.CreateBindTransformsAttr(Vt.Matrix4dArray(bind));skel.CreateRestTransformsAttr(Vt.Matrix4dArray(rest))
-animation=UsdSkel.Animation.Define(stage,'/RoomwavePilot/RoomwaveGlide')
-animation.CreateJointsAttr(joints)
-for sample in data['animation']:
-    transforms=[Gf.Transform(matrix(m)) for m in sample['local_transforms']]
-    translations=[Gf.Vec3f(*t.GetTranslation()) for t in transforms]
-    rotations=[]
-    for t in transforms:
-        q=t.GetRotation().GetQuat();rotations.append(Gf.Quatf(q.GetReal(),Gf.Vec3f(*q.GetImaginary())))
-    scales=[Gf.Vec3h(*t.GetScale()) for t in transforms]
-    animation.CreateTranslationsAttr().Set(Vt.Vec3fArray(translations),sample['frame'])
-    animation.CreateRotationsAttr().Set(Vt.QuatfArray(rotations),sample['frame'])
-    animation.CreateScalesAttr().Set(Vt.Vec3hArray(scales),sample['frame'])
-UsdSkel.BindingAPI.Apply(skel.GetPrim()).CreateAnimationSourceRel().SetTargets([animation.GetPath()])
+# RealityKit gathers meshes sharing one SkelRoot into a skinned render entity.
+# Give each independently toggled layer its own SkelRoot and equivalent rig.
+# Every mesh still has exactly one skeleton; all four rigs use the same motion.
+skeletons={}
+for group in groups:
+    base='/RoomwavePilot/'+group
+    skel=UsdSkel.Skeleton.Define(stage,base+'/skeletonRig')
+    skeletons[group]=skel
+    skel.CreateJointsAttr(joints)
+    skel.CreateBindTransformsAttr(Vt.Matrix4dArray(bind))
+    skel.CreateRestTransformsAttr(Vt.Matrix4dArray(rest))
+    animation=UsdSkel.Animation.Define(stage,base+'/RoomwaveGlide')
+    animation.CreateJointsAttr(joints)
+    for sample in data['animation']:
+        transforms=[Gf.Transform(matrix(m)) for m in sample['local_transforms']]
+        translations=[Gf.Vec3f(*t.GetTranslation()) for t in transforms]
+        rotations=[]
+        for t in transforms:
+            q=t.GetRotation().GetQuat();rotations.append(Gf.Quatf(q.GetReal(),Gf.Vec3f(*q.GetImaginary())))
+        scales=[Gf.Vec3h(*t.GetScale()) for t in transforms]
+        animation.CreateTranslationsAttr().Set(Vt.Vec3fArray(translations),sample['frame'])
+        animation.CreateRotationsAttr().Set(Vt.QuatfArray(rotations),sample['frame'])
+        animation.CreateScalesAttr().Set(Vt.Vec3hArray(scales),sample['frame'])
+    UsdSkel.BindingAPI.Apply(skel.GetPrim()).CreateAnimationSourceRel().SetTargets([animation.GetPath()])
+    layer_binding=UsdSkel.BindingAPI.Apply(stage.GetPrimAtPath(base))
+    layer_binding.CreateSkeletonRel().SetTargets([skel.GetPath()])
 
 for obj in data['meshes']:
     mesh=UsdGeom.Mesh.Define(stage,'/RoomwavePilot/'+obj['layer']+'/'+Tf.MakeValidIdentifier(obj['name']))
@@ -62,19 +75,40 @@ for obj in data['meshes']:
     points=obj['points'];mesh.CreateExtentAttr(Vt.Vec3fArray([Gf.Vec3f(*[min(p[i] for p in points) for i in range(3)]),Gf.Vec3f(*[max(p[i] for p in points) for i in range(3)])]))
     UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material_paths[obj['material']])
     binding=UsdSkel.BindingAPI.Apply(mesh.GetPrim())
-    binding.CreateSkeletonRel().SetTargets([skel.GetPath()]);binding.CreateGeomBindTransformAttr(Gf.Matrix4d(1))
+    binding.CreateSkeletonRel().SetTargets([skeletons[obj['layer']].GetPath()]);binding.CreateGeomBindTransformAttr(Gf.Matrix4d(1))
     binding.CreateJointsAttr(joints)
     binding.CreateSkinningMethodAttr('classicLinear')
     binding.CreateJointIndicesPrimvar(False,4).Set([int(i) for pairs in obj['weights'] for i,w in pairs])
     binding.CreateJointWeightsPrimvar(False,4).Set([float(w) for pairs in obj['weights'] for i,w in pairs])
 
+# Author conservative animated extents at each SkelRoot for runtime culling.
+cache=UsdSkel.Cache()
+for group in groups:
+    layer_root=UsdSkel.Root(stage.GetPrimAtPath('/RoomwavePilot/'+group))
+    cache.Populate(layer_root,Usd.PrimDefaultPredicate)
+    query=cache.GetSkelQuery(skeletons[group])
+    bounds=[]
+    for time in [0,15,30,45,60]:
+        transforms=query.ComputeSkinningTransforms(time)
+        all_points=[]
+        for prim in Usd.PrimRange(layer_root.GetPrim()):
+            if prim.IsA(UsdGeom.Mesh):
+                points=UsdGeom.Mesh(prim).GetPointsAttr().Get()
+                assert cache.GetSkinningQuery(prim).ComputeSkinnedPoints(transforms,points,time)
+                all_points.extend(points)
+        bounds.extend(all_points)
+    layer_root.CreateExtentAttr(Vt.Vec3fArray([
+        Gf.Vec3f(*[min(p[i] for p in bounds)-.03 for i in range(3)]),
+        Gf.Vec3f(*[max(p[i] for p in bounds)+.03 for i in range(3)])]))
 stage.GetRootLayer().Save()
 stage.Export(str(OUT/'RoomwavePilot.usda'))
 assert UsdUtils.CreateNewUsdzPackage(Sdf.AssetPath(str(path)),str(OUT/'RoomwavePilot.usdz'))
 opened=Usd.Stage.Open(str(OUT/'RoomwavePilot.usdz'));assert opened
-cache=UsdSkel.Cache();cache.Populate(UsdSkel.Root(opened.GetDefaultPrim()),Usd.PrimDefaultPredicate)
-query=cache.GetSkelQuery(UsdSkel.Skeleton(opened.GetPrimAtPath('/RoomwavePilot/skeletonRig')))
-assert query and len(query.GetJointOrder())==len(data['bones'])
+cache=UsdSkel.Cache()
+for group in groups:
+    cache.Populate(UsdSkel.Root(opened.GetPrimAtPath('/RoomwavePilot/'+group)),Usd.PrimDefaultPredicate)
+    query=cache.GetSkelQuery(UsdSkel.Skeleton(opened.GetPrimAtPath('/RoomwavePilot/'+group+'/skeletonRig')))
+    assert query and len(query.GetJointOrder())==len(data['bones'])
 topology=UsdSkel.Topology(joints);valid,reason=topology.Validate();assert valid,reason
 skinned=0
 for prim in opened.Traverse():
@@ -83,7 +117,8 @@ for prim in opened.Traverse():
         assert skin and skin.HasJointInfluences(),str(prim.GetPath())
         skinned+=1
 info={'format':'USDZ/UsdSkel','height_metres_rest':1.0,'up':'Y','forward':'-Z',
-      'layers':['Skin','Coat','SkeletonOverlay','MuscleOverlay'],'joints':len(data['bones']),
+      'layers':groups,'joints_per_layer':len(data['bones']),'skeletons':len(groups),
+      'hierarchy':'Xform root with four independently skinned named SkelRoot layers',
       'skinned_meshes':skinned,'triangles':sum(len(m['triangles']) for m in data['meshes']),
       'animation':{'name':'RoomwaveGlide','duration_seconds':2,'samples':61,'fps':30},
       'sha256':hashlib.sha256((OUT/'RoomwavePilot.usdz').read_bytes()).hexdigest(),
