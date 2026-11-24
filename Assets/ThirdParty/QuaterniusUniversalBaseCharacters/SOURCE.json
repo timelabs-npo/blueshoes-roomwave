@@ -33,8 +33,9 @@
     "Outer jacket, boots, gauntlets and emblem are derived from or attached to the free base mesh.",
     "A project-authored cape mesh and coat-tail joint were added.",
     "SkeletonOverlay and MuscleOverlay are project-authored stylized rigid-weighted helpers, not authentic anatomical bones, muscles, soft-body physics or physiological simulation.",
-    "Project-authored RoomwaveGlide animation drives the shared rig for 2 seconds.",
-    "Geometry transformed to Y up, -Z forward, approximately one metre rest height."
+    "Project-authored RoomwaveGlide animation drives equivalent per-layer rigs for 2 seconds.",
+    "Geometry transformed to Y up, -Z forward, approximately one metre rest height.",
+    "Four independent SkelRoot layers retain separate runtime renderable groups; identical rig/animation definitions are duplicated per layer."
   ],
   "derived_asset_license": "CC0-1.0",
   "code_license": "MIT",
@@ -49,7 +50,9 @@
       "SkeletonOverlay",
       "MuscleOverlay"
     ],
-    "joints": 66,
+    "joints_per_layer": 66,
+    "skeletons": 4,
+    "hierarchy": "Xform root with four independently skinned named SkelRoot layers",
     "skinned_meshes": 36,
     "triangles": 22912,
     "animation": {
@@ -58,9 +61,8 @@
       "samples": 61,
       "fps": 30
     },
-    "sha256": "4cf89932ea8e4a1a19fa974606aa9b3aa843c618c84a7f7c26bed51db0ba2993",
-    "bytes": 606985,
-    "validation": "USD stage opened, topology validated, all meshes have skinned joint influences; Apple device playback not yet tested.",
-    "skinned_bounds_at_frames_0_15_30_60": "All samples finite, X approximately +/-0.48m, Y -0.005..1.029m, Z -0.090..0.215m. Loop endpoints 0 and60 agree."
+    "sha256": "9c1c0a0af0952fa30f91918048bfcd5553d52556ba83c720598aeba5b9cd5c8d",
+    "bytes": 607617,
+    "validation": "USD stage opened, topology validated, all meshes have skinned joint influences; Apple device playback not yet tested."
   }
 }
