@@ -1,0 +1,10 @@
+{
+  "captureID": "synthetic-invented-rectangle-local-only",
+  "source": "synthetic",
+  "points": [
+    {"x": -3, "y": 0, "z": -2},
+    {"x": 3, "y": 0, "z": -2},
+    {"x": 3, "y": 1, "z": 2},
+    {"x": -3, "y": 1, "z": 2}
+  ]
+}
