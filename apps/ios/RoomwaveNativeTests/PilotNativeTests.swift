@@ -11,6 +11,7 @@ final class PilotNativeTests: XCTestCase {
             ?? Bundle.main.url(forResource: "RoomwavePilot", withExtension: "usdz"))
         let asset = try await Entity(contentsOf: url)
         let entities = allEntities(in: asset)
+        reportEntityTree(asset)
         for name in ["Skin", "Coat", "SkeletonOverlay", "MuscleOverlay"] {
             let layer = try XCTUnwrap(entities.first { $0.name == name }, "Missing \(name)")
             XCTAssertTrue(allEntities(in: layer).contains { $0.components[ModelComponent.self] != nil },
@@ -80,4 +81,14 @@ final class PilotNativeTests: XCTestCase {
     private func allEntities(in root: Entity) -> [Entity] {
         [root] + root.children.flatMap { allEntities(in: $0) }
     }
+    // Runtime import evidence: USD validation cannot show RealityKit's imported hierarchy.
+    @MainActor
+    private func reportEntityTree(_ entity: Entity, depth: Int = 0) {
+        guard depth < 32 else { return }
+        let bounds = entity.visualBounds(relativeTo: nil).extents
+        let components = String(describing: entity.components).prefix(400)
+        print("ASSET_TREE \(String(repeating: "  ", count: depth))\(entity.name) model=\(entity.components[ModelComponent.self] != nil) animations=\(entity.availableAnimations.count) bounds=\(bounds) components=\(components)")
+        for child in entity.children { reportEntityTree(child, depth: depth + 1) }
+    }
+
 }

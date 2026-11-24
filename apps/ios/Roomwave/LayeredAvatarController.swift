@@ -25,7 +25,7 @@ final class LayeredAvatarController {
     ]
     private var coatRestPoses: [(entity: Entity, transform: Transform)] = []
     private var bundledAsset: Entity?
-    private var animationPlayback: AnimationPlaybackController?
+    private var animationPlaybacks: [AnimationPlaybackController] = []
     private var isLoading = false
 
     init() {
@@ -79,17 +79,16 @@ final class LayeredAvatarController {
                 return
             }
 
-            // Independent toggles need independent layer subtrees. Never hide a rig
-            // through a visual layer, or hide an overlay by switching off Skin.
+            // Each layer now owns its own rig and can be disabled independently.
+            // Visual layer subtrees must still not contain one another.
             let visualLayers = Layer.allCases.flatMap { found[$0] ?? [] }
             let overlaps = visualLayers.contains { layer in
                 hierarchy(of: layer).dropFirst().contains { descendant in
-                    descendant.name == "SkeletonRig" ||
                     visualLayers.contains { $0 === descendant }
                 }
             }
             guard !overlaps else {
-                reportFallback("visual layers must be separate from each other and SkeletonRig")
+                reportFallback("visual layers must be separate from each other")
                 return
             }
             try Task.checkCancellation()
@@ -102,17 +101,34 @@ final class LayeredAvatarController {
             coatRestPoses = (found[.coat] ?? []).map { ($0, $0.transform) }
             applyLayerVisibility() // Includes choices made while the load was suspended.
 
-            // Play just one clip on its owning entity, avoiding competing parent/child
-            // clips. Procedural body motion lives outside the imported animation tree.
-            var hasEmbeddedAnimation = false
-            for entity in entities {
-                if let animation = entity.availableAnimations.first {
-                    animationPlayback = entity.playAnimation(animation.repeat(),
-                                                            transitionDuration: 0.2)
-                    hasEmbeddedAnimation = true
-                    break
+            // Four independent SkelRoots may expose one clip per layer or a
+            // root animation library. Choose one ownership level, never both.
+            let perLayerOwners = Layer.allCases.compactMap { layer -> Entity? in
+                (found[layer] ?? []).flatMap { hierarchy(of: $0) }
+                    .first { !$0.availableAnimations.isEmpty }
+            }
+            animationPlaybacks.removeAll()
+            if perLayerOwners.count == Layer.allCases.count {
+                for owner in perLayerOwners {
+                    if let clip = owner.availableAnimations.first {
+                        animationPlaybacks.append(owner.playAnimation(clip.repeat(), transitionDuration: 0))
+                    }
+                }
+            } else if !asset.availableAnimations.isEmpty {
+                // The imported root resources have disjoint authored rig bindings.
+                for clip in asset.availableAnimations {
+                    animationPlaybacks.append(asset.playAnimation(clip.repeat(), transitionDuration: 0))
+                }
+            } else {
+                // No overlapping ancestor/descendant playback. Missing clips stay
+                // visible in status rather than claiming four animated layers.
+                for owner in perLayerOwners {
+                    if let clip = owner.availableAnimations.first {
+                        animationPlaybacks.append(owner.playAnimation(clip.repeat(), transitionDuration: 0))
+                    }
                 }
             }
+            let hasEmbeddedAnimation = !animationPlaybacks.isEmpty
             assetStatus = "Bundled RoomwavePilot.usdz loaded; four visual layers found; " +
                 (hasEmbeddedAnimation ? "embedded animation + procedural motion." :
                     "no embedded animation; procedural motion only.") +
