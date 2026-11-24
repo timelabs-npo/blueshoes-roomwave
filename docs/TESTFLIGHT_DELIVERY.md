@@ -37,7 +37,7 @@ The abandoned new-bundle plan received an Apple registration 403 and had no app 
 - `export_ipa=true`: validate native paths, sign and export.
 - `upload=true`: also verify the exact Apple app ID/bundle and unused build number, then upload through Xcode's transporter tooling.
 
-Validation runs shared Swift tests and the native simulator tests for photo import and the layered model, then creates an unsigned generic-device Release archive and verifies its actual bundle, model, icon catalog and elapsed-time privacy manifest. A core-only or OpenUSD-only pass does not establish RealityKit loading.
+Validation always runs shared Swift tests and the native simulator tests for photo import and the layered model. Validate-only runs then create an unsigned generic-device Release archive and verify its actual bundle, model, icon catalog and elapsed-time privacy manifest. For signed export or upload, validation defers the Release archive to the protected release job, which creates and verifies the signed archive before export/upload; this avoids compiling both unsigned and signed Release archives in one run. A core-only or OpenUSD-only pass does not establish RealityKit loading.
 
 The release job creates an ephemeral keychain, verifies the Apple-issued profile and compiled app identity, exports a signed IPA, and optionally uploads it. Secret material and the temporary keychain are removed on exit; the previous keychain search list is restored. The selected signing certificate must be included in the profile. An already installed byte-identical profile is reused and left intact; a conflicting profile is never overwritten. Artifacts contain validation evidence and receipts; signing material and the IPA are not published as repository artifacts.
 

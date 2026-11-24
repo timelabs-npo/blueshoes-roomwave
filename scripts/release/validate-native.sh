@@ -27,6 +27,10 @@ if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configura
   exit 1
 fi
 tail -n 45 build/release/native-test.log
+if [[ "${DEFER_ARCHIVE_TO_SIGNED_RELEASE:-false}" == true ]]; then
+  echo "Native tests passed; the protected release job will archive and verify the signed app."
+  exit 0
+fi
 if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configuration Release \
   -destination 'generic/platform=iOS' -archivePath build/release/UnsignedRoomwave.xcarchive \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=1 MARKETING_VERSION=0.2.0 \

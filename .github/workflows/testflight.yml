@@ -32,6 +32,8 @@ jobs:
         run: command -v xcodegen >/dev/null || brew install xcodegen
       - name: Validate shared rules and native asset/photo paths
         run: bash scripts/release/validate-native.sh
+        env:
+          DEFER_ARCHIVE_TO_SIGNED_RELEASE: ${{ inputs.export_ipa || inputs.upload }}
       - name: Preserve native validation evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
