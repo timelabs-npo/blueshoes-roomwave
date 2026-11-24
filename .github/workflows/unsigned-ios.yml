@@ -70,7 +70,7 @@ jobs:
           -configuration Debug -sdk iphonesimulator
           -destination "platform=iOS Simulator,id=$ROOMWAVE_SIMULATOR_ID"
           -derivedDataPath ../../.derivedData
-          -resultBundlePath ../../.test-results/RoomwaveNative.xcresult
+          -resultBundlePath ../../build/native-test-results/RoomwaveNative.xcresult
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
       - name: Capture the running simulator pilot
         timeout-minutes: 3
@@ -120,6 +120,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: roomwave-native-test-results
-          path: .test-results
+          path: build/native-test-results
           if-no-files-found: ignore
           retention-days: 7
