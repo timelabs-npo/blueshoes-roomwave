@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# This workflow only signs the new Blueshoes Roomwave bundle. Never enable shell tracing.
+# Sign Roomwave only under the user-authorized existing Molecule Foundry identity. Never enable shell tracing.
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/../.."
@@ -7,7 +7,12 @@ cd "$(dirname "$0")/../.."
 for name in DEVELOPMENT_TEAM PRODUCT_BUNDLE_IDENTIFIER PROVISIONING_PROFILE_NAME APPLE_DISTRIBUTION_P12_BASE64 APPLE_DISTRIBUTION_P12_PASSWORD APP_STORE_PROFILE_BASE64; do
   [[ -n "${!name:-}" ]] || { echo "Missing protected release value: $name"; exit 2; }
 done
-[[ "$PRODUCT_BUNDLE_IDENTIFIER" == org.timelabs.blueshoes.roomwave ]] || { echo 'Unexpected app identity.'; exit 2; }
+[[ "$PRODUCT_BUNDLE_IDENTIFIER" == org.timelabs.moleculefoundry ]] || { echo 'Unexpected app identity.'; exit 2; }
+[[ "$DEVELOPMENT_TEAM" == 398XACWZ7G ]] || { echo 'Unexpected Apple team.'; exit 2; }
+[[ "${GITHUB_RUN_NUMBER:-}" =~ ^[1-9][0-9]*$ && "${GITHUB_RUN_ATTEMPT:-}" =~ ^[1-9][0-9]*$ ]] || { echo 'Invalid workflow build number.'; exit 2; }
+(( GITHUB_RUN_NUMBER <= 8999 && GITHUB_RUN_ATTEMPT <= 99 )) || { echo 'Workflow build number exceeds Apple version component limits.'; exit 2; }
+BUILD_NUMBER="$((1000 + GITHUB_RUN_NUMBER)).${GITHUB_RUN_ATTEMPT}"
+export ROOMWAVE_RELEASE_BUILD="$BUILD_NUMBER"
 mkdir -p build/release/export
 if [[ "${UPLOAD_TO_TESTFLIGHT:-false}" == true ]]; then
   node scripts/release/apple-status.mjs app
@@ -49,7 +54,7 @@ PROFILE_UUID=$(python3 - <<'PY'
 import datetime,hashlib,os,plistlib
 from pathlib import Path
 p=plistlib.loads((Path(os.environ['ROOMWAVE_SIGNING_WORK'])/'profile.plist').read_bytes())
-assert p['Entitlements']['application-identifier']==os.environ['DEVELOPMENT_TEAM']+'.org.timelabs.blueshoes.roomwave'
+assert p['Entitlements']['application-identifier']==os.environ['DEVELOPMENT_TEAM']+'.org.timelabs.moleculefoundry'
 assert p['Name']==os.environ['PROVISIONING_PROFILE_NAME']
 assert any(hashlib.sha1(c).hexdigest().upper()==os.environ['ROOMWAVE_SIGNING_IDENTITY'].upper() for c in p['DeveloperCertificates']), 'Signing certificate is not contained in this profile'
 assert p['ExpirationDate']>datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
@@ -60,17 +65,19 @@ PY
 )
 PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
 mkdir -p "$PROFILE_DIR"
-PROFILE_PATH="$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
-[[ ! -e "$PROFILE_PATH" ]] || { echo 'Refusing to replace an existing profile.'; PROFILE_PATH=''; exit 2; }
-cp "$ROOMWAVE_SIGNING_WORK/profile.mobileprovision" "$PROFILE_PATH"
-BUILD_NUMBER="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-export ROOMWAVE_RELEASE_BUILD="$BUILD_NUMBER"
+INSTALLED_PROFILE_PATH="$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
+if [[ -e "$INSTALLED_PROFILE_PATH" ]]; then
+  cmp -s "$ROOMWAVE_SIGNING_WORK/profile.mobileprovision" "$INSTALLED_PROFILE_PATH" || { echo 'An existing profile has different content; refusing to replace it.'; exit 2; }
+else
+  PROFILE_PATH="$INSTALLED_PROFILE_PATH"
+  cp "$ROOMWAVE_SIGNING_WORK/profile.mobileprovision" "$PROFILE_PATH"
+fi
 xcodegen generate --spec apps/ios/project.yml --project apps/ios
 if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configuration Release \
   -destination 'generic/platform=iOS' -archivePath build/release/Roomwave.xcarchive \
   DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$IDENTITY" \
   PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-  MARKETING_VERSION=0.1.0 archive > build/release/archive.log 2>&1; then
+  MARKETING_VERSION=0.2.0 archive > build/release/archive.log 2>&1; then
   tail -n 100 build/release/archive.log; exit 1
 fi
 APP=build/release/Roomwave.xcarchive/Products/Applications/Roomwave.app
@@ -80,7 +87,7 @@ python3 - <<'PY'
 import os,plistlib
 from pathlib import Path
 options={'method':'app-store-connect','destination':'export','signingStyle':'manual','teamID':os.environ['DEVELOPMENT_TEAM'],
-         'provisioningProfiles':{'org.timelabs.blueshoes.roomwave':os.environ['PROVISIONING_PROFILE_NAME']},
+         'provisioningProfiles':{'org.timelabs.moleculefoundry':os.environ['PROVISIONING_PROFILE_NAME']},
          'manageAppVersionAndBuildNumber':False,'uploadSymbols':True}
 Path('build/release/ExportOptions.plist').write_bytes(plistlib.dumps(options))
 PY
@@ -111,7 +118,7 @@ python3 - <<'PY'
 import datetime,hashlib,json,os
 from pathlib import Path
 ipa=Path(os.environ['ROOMWAVE_RELEASE_IPA'])
-receipt={'commit':os.environ['GITHUB_SHA'],'bundle_identifier':'org.timelabs.blueshoes.roomwave','version':'0.1.0',
+receipt={'commit':os.environ['GITHUB_SHA'],'app_store_app_id':'6837899703','bundle_identifier':'org.timelabs.moleculefoundry','version':'0.2.0',
          'build':os.environ['ROOMWAVE_RELEASE_BUILD'],'signature_verified':True,'ipa_sha256':hashlib.sha256(ipa.read_bytes()).hexdigest(),
          'upload_accepted':os.environ['ROOMWAVE_UPLOAD_ACCEPTED']=='true','tester_access_verified':False,
          'observed_utc':datetime.datetime.now(datetime.timezone.utc).isoformat()}

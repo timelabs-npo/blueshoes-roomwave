@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
       upload:
-        description: Upload to the verified Roomwave App Store Connect record
+        description: Upload Roomwave beta to the authorized existing Molecule Foundry app
         type: boolean
         default: false
 
