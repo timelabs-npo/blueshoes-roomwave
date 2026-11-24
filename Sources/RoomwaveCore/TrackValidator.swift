@@ -10,7 +10,7 @@ public enum TrackValidator {
         }
         let r = track.rules
         let numbers = [r.initialSpeed, r.maximumSpeed, r.acceleration, r.steeringSpeed, r.bankSpeedFactor, r.multiplierGain]
-        if r.version.isEmpty || r.version.utf8.count > 128 || !(1...240).contains(r.tickRate)
+        if !["roomwave-rules-1", "roomwave-pilot-2"].contains(r.version) || !(1...240).contains(r.tickRate)
             || !(1...864000).contains(r.durationTicks) || !numbers.allSatisfy({ $0.isFinite })
             || r.initialSpeed <= 0 || r.maximumSpeed < r.initialSpeed || r.maximumSpeed > 100
             || r.acceleration < 0 || r.acceleration > 100 || r.steeringSpeed <= 0 || r.steeringSpeed > 100
