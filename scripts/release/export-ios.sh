@@ -3,6 +3,9 @@
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/../.."
+ROOMWAVE_RELEASE_VERSION="$(cat VERSION)"
+[[ "$ROOMWAVE_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid marketing version.'; exit 2; }
+export ROOMWAVE_RELEASE_VERSION
 [[ "${GITHUB_REF:-}" == refs/heads/main ]] || { echo 'Release requires main.'; exit 2; }
 for name in DEVELOPMENT_TEAM PRODUCT_BUNDLE_IDENTIFIER PROVISIONING_PROFILE_NAME APPLE_DISTRIBUTION_P12_BASE64 APPLE_DISTRIBUTION_P12_PASSWORD APP_STORE_PROFILE_BASE64; do
   [[ -n "${!name:-}" ]] || { echo "Missing protected release value: $name"; exit 2; }
@@ -77,7 +80,7 @@ if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configura
   -destination 'generic/platform=iOS' -archivePath build/release/Roomwave.xcarchive \
   DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$IDENTITY" \
   PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-  MARKETING_VERSION=0.2.0 archive > build/release/archive.log 2>&1; then
+  MARKETING_VERSION="$ROOMWAVE_RELEASE_VERSION" archive > build/release/archive.log 2>&1; then
   tail -n 100 build/release/archive.log; exit 1
 fi
 APP=build/release/Roomwave.xcarchive/Products/Applications/Roomwave.app
@@ -118,7 +121,7 @@ python3 - <<'PY'
 import datetime,hashlib,json,os
 from pathlib import Path
 ipa=Path(os.environ['ROOMWAVE_RELEASE_IPA'])
-receipt={'commit':os.environ['GITHUB_SHA'],'app_store_app_id':'6837899703','bundle_identifier':'org.timelabs.moleculefoundry','version':'0.2.0',
+receipt={'commit':os.environ['GITHUB_SHA'],'app_store_app_id':'6837899703','bundle_identifier':'org.timelabs.moleculefoundry','version':os.environ['ROOMWAVE_RELEASE_VERSION'],
          'build':os.environ['ROOMWAVE_RELEASE_BUILD'],'signature_verified':True,'ipa_sha256':hashlib.sha256(ipa.read_bytes()).hexdigest(),
          'upload_accepted':os.environ['ROOMWAVE_UPLOAD_ACCEPTED']=='true','tester_access_verified':False,
          'observed_utc':datetime.datetime.now(datetime.timezone.utc).isoformat()}

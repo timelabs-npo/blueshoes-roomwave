@@ -19,6 +19,12 @@ PY
 )
 xcrun simctl boot "$ROOMWAVE_SIMULATOR_ID" >/dev/null 2>&1 || true
 xcrun simctl bootstatus "$ROOMWAVE_SIMULATOR_ID" -b
+mkdir -p build/release/evidence
+python3 scripts/ci/watch-arcade-recording.py --simulator "$ROOMWAVE_SIMULATOR_ID" \
+  --output build/release/evidence/Roomwave-actual-ui-test.mp4 &
+ROOMWAVE_CAPTURE_PID=$!
+stop_capture() { kill -TERM "$ROOMWAVE_CAPTURE_PID" 2>/dev/null || true; wait "$ROOMWAVE_CAPTURE_PID" || true; }
+trap stop_capture EXIT
 if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configuration Debug \
   -destination "platform=iOS Simulator,id=$ROOMWAVE_SIMULATOR_ID" \
   -derivedDataPath build/release/DerivedData -resultBundlePath build/release/NativeTests.xcresult \
@@ -26,14 +32,25 @@ if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configura
   tail -n 120 build/release/native-test.log
   exit 1
 fi
+stop_capture
+trap - EXIT
 tail -n 45 build/release/native-test.log
+ROOMWAVE_APP_DATA="$(xcrun simctl get_app_container "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry data)"
+cp -R "$ROOMWAVE_APP_DATA/Library/Caches/RoomwaveArcadeCaptures/." build/release/evidence/
+python3 scripts/ci/verify-arcade-evidence.py build/release/evidence
+git rev-parse HEAD > build/release/evidence/source-sha.txt
+xcrun simctl list devices "$ROOMWAVE_SIMULATOR_ID" > build/release/evidence/simulator.txt
+xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/release/evidence/Roomwave-full-ui.png
+ROOMWAVE_SIM_APP=build/release/DerivedData/Build/Products/Debug-iphonesimulator/Roomwave.app
+python3 scripts/release/verify-app.py "$ROOMWAVE_SIM_APP" --build 1 > build/release/simulator-identity.json
+ditto -c -k --keepParent "$ROOMWAVE_SIM_APP" build/release/Roomwave-simulator.app.zip
 if [[ "${DEFER_ARCHIVE_TO_SIGNED_RELEASE:-false}" == true ]]; then
   echo "Native tests passed; the protected release job will archive and verify the signed app."
   exit 0
 fi
 if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configuration Release \
   -destination 'generic/platform=iOS' -archivePath build/release/UnsignedRoomwave.xcarchive \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=1 MARKETING_VERSION=0.2.0 \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=1 MARKETING_VERSION="$(cat VERSION)" \
   archive > build/release/unsigned-archive.log 2>&1; then
   tail -n 120 build/release/unsigned-archive.log
   exit 1

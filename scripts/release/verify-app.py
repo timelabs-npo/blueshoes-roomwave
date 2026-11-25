@@ -5,6 +5,7 @@ from pathlib import Path
 p=argparse.ArgumentParser()
 p.add_argument("path",type=Path)
 p.add_argument("--build",required=True)
+p.add_argument("--version",default=(Path(__file__).resolve().parents[2]/"VERSION").read_text().strip())
 args=p.parse_args()
 if args.path.suffix==".ipa":
     with zipfile.ZipFile(args.path) as archive:
@@ -20,7 +21,7 @@ else:
     model=any(x.stat().st_size>0 for x in args.path.rglob("RoomwavePilot.usdz"))
     catalog=(args.path/"Assets.car").is_file()
     privacy=plistlib.loads((args.path/"PrivacyInfo.xcprivacy").read_bytes()) if (args.path/"PrivacyInfo.xcprivacy").is_file() else None
-for key,value in {"CFBundleIdentifier":"org.timelabs.moleculefoundry","CFBundleShortVersionString":"0.2.0","CFBundleVersion":args.build}.items():
+for key,value in {"CFBundleIdentifier":"org.timelabs.moleculefoundry","CFBundleShortVersionString":args.version,"CFBundleVersion":args.build}.items():
     if str(info.get(key))!=value: raise SystemExit("Compiled identity differs: "+key)
 if 2 in info.get("UIDeviceFamily", []):
     required_orientations = {
@@ -35,4 +36,4 @@ if not model or not catalog: raise SystemExit("Pilot asset or compiled asset cat
 if info.get("ITSAppUsesNonExemptEncryption") is not False: raise SystemExit("Explicit encryption-compliance value is required")
 if not privacy or privacy.get("NSPrivacyTracking") is not False or not any(x.get("NSPrivacyAccessedAPIType")=="NSPrivacyAccessedAPICategorySystemBootTime" and "35F9.1" in x.get("NSPrivacyAccessedAPITypeReasons",[]) for x in privacy.get("NSPrivacyAccessedAPITypes",[])):
     raise SystemExit("Expected elapsed-time privacy manifest is missing")
-print(json.dumps({"bundle":"org.timelabs.moleculefoundry","version":"0.2.0","build":args.build,"identity_verified":True,"pilot_asset_present":True,"asset_catalog_present":True,"privacy_manifest_verified":True}))
+print(json.dumps({"bundle":"org.timelabs.moleculefoundry","version":args.version,"build":args.build,"identity_verified":True,"pilot_asset_present":True,"asset_catalog_present":True,"privacy_manifest_verified":True}))

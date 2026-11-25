@@ -3,6 +3,10 @@ name: Roomwave TestFlight pilot
 on:
   workflow_dispatch:
     inputs:
+      expected_sha:
+        description: Exact reviewed main commit to validate and release
+        type: string
+        required: true
       export_ipa:
         description: Export a signed pilot after native validation
         type: boolean
@@ -26,11 +30,17 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify requested source
+        env:
+          ROOMWAVE_EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: test "$GITHUB_SHA" = "$ROOMWAVE_EXPECTED_SHA"
       - name: Select stable Xcode 27.2
         run: bash scripts/release/select-xcode.sh
       - name: Install project generator
         run: command -v xcodegen >/dev/null || brew install xcodegen
-      - name: Validate shared rules and native asset/photo paths
+      - name: Validate arcade rules, real touch flow and native rendering
         run: bash scripts/release/validate-native.sh
         env:
           DEFER_ARCHIVE_TO_SIGNED_RELEASE: ${{ inputs.export_ipa || inputs.upload }}
@@ -44,6 +54,7 @@ jobs:
           path: |
             build/release/*.log
             build/release/NativeTests.xcresult
+            build/release/evidence
             build/release/unsigned-archive-identity.json
             build/release/UnsignedRoomwave.xcarchive.zip
   release:
@@ -54,6 +65,8 @@ jobs:
     environment: testflight
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
