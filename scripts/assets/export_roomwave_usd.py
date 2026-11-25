@@ -1,10 +1,22 @@
 """Reproducible USD Skel export of the derived CC0 Roomwave character."""
-import sys,pathlib,json,re,hashlib
+import sys,pathlib,json,re,hashlib,math
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 
 from pxr import Usd,UsdGeom,UsdSkel,UsdShade,UsdUtils,Gf,Vt,Sdf,Tf
 
 OUT=ROOT/'build/character'; data=json.loads((OUT/'character_data.json').read_text())
+# Validate the authored source before serializing a rig. These are real mesh
+# weights/coordinates, not a filename or animation-name assertion.
+assert len(data['bones'])==66
+assert {obj['layer'] for obj in data['meshes']}=={'Skin','Coat','SkeletonOverlay','MuscleOverlay'}
+for obj in data['meshes']:
+    assert len(obj['weights'])==len(obj['points'])
+    assert all(math.isfinite(value) for point in obj['points'] for value in point)
+    for influences in obj['weights']:
+        assert len(influences)==4
+        assert all(isinstance(index,int) and 0<=index<len(data['bones']) and
+                   math.isfinite(weight) and weight>=0 for index,weight in influences)
+        assert abs(sum(weight for _,weight in influences)-1)<1e-6
 path=OUT/'RoomwavePilot.usdc';stage=Usd.Stage.CreateNew(str(path))
 UsdGeom.SetStageUpAxis(stage,UsdGeom.Tokens.y);UsdGeom.SetStageMetersPerUnit(stage,1.)
 stage.SetStartTimeCode(0);stage.SetEndTimeCode(60);stage.SetTimeCodesPerSecond(30);stage.SetFramesPerSecond(30)
@@ -23,8 +35,9 @@ for name,rgba in data['materials'].items():
     shader=UsdShade.Shader.Define(stage,mat.GetPath().AppendChild('PreviewSurface'))
     shader.CreateIdAttr('UsdPreviewSurface')
     shader.CreateInput('diffuseColor',Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*rgba[:3]))
-    shader.CreateInput('roughness',Sdf.ValueTypeNames.Float).Set(.34)
-    shader.CreateInput('metallic',Sdf.ValueTypeNames.Float).Set(.25)
+    surface=data['surfaces'][name]
+    shader.CreateInput('roughness',Sdf.ValueTypeNames.Float).Set(surface['roughness'])
+    shader.CreateInput('metallic',Sdf.ValueTypeNames.Float).Set(surface['metallic'])
     if name in ['Cyan','Eye']:
         shader.CreateInput('emissiveColor',Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*[x*.7 for x in rgba[:3]]))
     mat.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(),'surface')
@@ -81,25 +94,47 @@ for obj in data['meshes']:
     binding.CreateJointIndicesPrimvar(False,4).Set([int(i) for pairs in obj['weights'] for i,w in pairs])
     binding.CreateJointWeightsPrimvar(False,4).Set([float(w) for pairs in obj['weights'] for i,w in pairs])
 
-# Author conservative animated extents at each SkelRoot for runtime culling.
+# Evaluate every authored frame, validate the planted soles/loop closure, and
+# author conservative animated extents at each SkelRoot for runtime culling.
 cache=UsdSkel.Cache()
+animation_bounds={}
+loop_max_error=0.
 for group in groups:
     layer_root=UsdSkel.Root(stage.GetPrimAtPath('/RoomwavePilot/'+group))
     cache.Populate(layer_root,Usd.PrimDefaultPredicate)
     query=cache.GetSkelQuery(skeletons[group])
-    bounds=[]
-    for time in [0,15,30,45,60]:
+    bounds=[];first_points={};floors=[];motion_max=0.
+    for time in range(61):
         transforms=query.ComputeSkinningTransforms(time)
         all_points=[]
         for prim in Usd.PrimRange(layer_root.GetPrim()):
             if prim.IsA(UsdGeom.Mesh):
                 points=UsdGeom.Mesh(prim).GetPointsAttr().Get()
                 assert cache.GetSkinningQuery(prim).ComputeSkinnedPoints(transforms,points,time)
+                assert all(math.isfinite(float(value)) for point in points for value in point)
+                key=str(prim.GetPath())
+                if time==0:first_points[key]=list(points)
+                if time>0:
+                    motion_max=max(motion_max,max((point-start).GetLength()
+                        for point,start in zip(points,first_points[key])))
+                if time==60:
+                    loop_max_error=max(loop_max_error,max((point-start).GetLength()
+                        for point,start in zip(points,first_points[key])))
                 all_points.extend(points)
         bounds.extend(all_points)
+        floors.append(min(point[1] for point in all_points))
+    lower=[min(p[i] for p in bounds) for i in range(3)]
+    upper=[max(p[i] for p in bounds) for i in range(3)]
+    animation_bounds[group]={'min':lower,'max':upper,
+        'minimum_y_range':[min(floors),max(floors)],
+        'maximum_motion_from_first_sample':motion_max}
+    assert motion_max>.001, f'{group} has no observed skinned animation'
     layer_root.CreateExtentAttr(Vt.Vec3fArray([
-        Gf.Vec3f(*[min(p[i] for p in bounds)-.03 for i in range(3)]),
-        Gf.Vec3f(*[max(p[i] for p in bounds)+.03 for i in range(3)])]))
+        Gf.Vec3f(*[value-.03 for value in lower]),
+        Gf.Vec3f(*[value+.03 for value in upper])]))
+assert loop_max_error<1e-5,loop_max_error
+assert max(abs(value) for value in animation_bounds['Skin']['minimum_y_range'])<.008
+assert animation_bounds['Coat']['min'][1]>-.02
 stage.GetRootLayer().Save()
 stage.Export(str(OUT/'RoomwavePilot.usda'))
 assert UsdUtils.CreateNewUsdzPackage(Sdf.AssetPath(str(path)),str(OUT/'RoomwavePilot.usdz'))
@@ -121,8 +156,12 @@ info={'format':'USDZ/UsdSkel','height_metres_rest':1.0,'up':'Y','forward':'-Z',
       'hierarchy':'Xform root with four independently skinned named SkelRoot layers',
       'skinned_meshes':skinned,'triangles':sum(len(m['triangles']) for m in data['meshes']),
       'animation':{'name':'RoomwaveGlide','duration_seconds':2,'samples':61,'fps':30},
+      'animated_validation':{'evaluated_samples_per_layer':61,
+          'loop_endpoint_max_error_metres':loop_max_error,
+          'finite_coordinates':True,'normalized_weights':True,
+          'layer_bounds_metres':animation_bounds},
       'sha256':hashlib.sha256((OUT/'RoomwavePilot.usdz').read_bytes()).hexdigest(),
       'bytes':(OUT/'RoomwavePilot.usdz').stat().st_size,
-      'validation':'USD stage opened, topology validated, all meshes have skinned joint influences; Apple device playback not yet tested.'}
+      'validation':'USD stage reopened; topology and normalized skinning validated; all 61 animated samples finite; soles planted and loop endpoints matched. New asset requires native import/playback revalidation; physical iPhone playback not tested.'}
 (OUT/'MODEL_VALIDATION.json').write_text(json.dumps(info,indent=2)+'\n')
 print(json.dumps(info,indent=2))

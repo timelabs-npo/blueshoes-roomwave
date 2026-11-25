@@ -33,8 +33,14 @@ final class PilotNativeTests: XCTestCase {
         XCTAssertEqual(avatar.root.findEntity(named: "MuscleOverlay")?.isEnabled, true)
         XCTAssertEqual(avatar.root.findEntity(named: "Skin")?.isEnabled, false)
         XCTAssertEqual(avatar.root.findEntity(named: "Coat")?.isEnabled, false)
+        let coat = try XCTUnwrap(avatar.root.findEntity(named: "Coat"))
+        let outfitTransform = coat.transform
         avatar.update(speed: 9, steering: 0.7, time: 1.3)
         XCTAssertEqual(avatar.root.position, SIMD3(4, 1, 7))
+        XCTAssertEqual(coat.position, outfitTransform.translation)
+        XCTAssertEqual(coat.scale, outfitTransform.scale)
+        XCTAssertEqual(coat.orientation.vector, outfitTransform.rotation.vector,
+                       "The complete skinned outfit must not rotate away from the body")
         avatar.setLayerVisibility(skeleton: false, muscle: false, skin: true, coat: true)
         XCTAssertEqual(avatar.root.findEntity(named: "Skin")?.isEnabled, true)
         XCTAssertEqual(avatar.root.findEntity(named: "Coat")?.isEnabled, true)

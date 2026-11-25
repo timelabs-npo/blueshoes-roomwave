@@ -1,0 +1,45 @@
+{
+  "kind": "actual_blender_asset_render",
+  "not_gameplay_capture": true,
+  "created_utc": "2026-11-25T20:14:01.986798+00:00",
+  "source_base_commit": "54dbb3422794025030a03f535b68c6764fbfaaf7",
+  "tool": "Blender 4.3.2 / Cycles CPU",
+  "authored_frame": 20,
+  "fps": 30,
+  "asset_sha256": "1eff38b20f3c443e04f5dc80f526067e35a4441ac4bae7aca6abe04a5ecb6d3f",
+  "authored_data_sha256": "b1d7aae40775b043e94d9832fae3910e3e8b0f499357bf70d775129cc667a6d0",
+  "source_script_sha256": "72694b03d417496f15b1a11c5ee0df6b257ef977a70c300a54df6f0c4200643f",
+  "images": [
+    {
+      "file": "Avatar-Surf-Stance-Rear.png",
+      "sha256": "a2de886b4e6111258fba0116c18266a864e2e81a2b307b1738487853f94d811c",
+      "bytes": 812944
+    },
+    {
+      "file": "Avatar-Surf-Stance-Front.png",
+      "sha256": "f9d3cb60587c4da2a2418f3e5f6dda93963dc27637b8a1a2438be3e38997160f",
+      "bytes": 770638
+    },
+    {
+      "file": "Layer_Skin.png",
+      "sha256": "faa02a3d70ff4e06d583e03e6ddf4c621e4633c962be7bab6cb00bf05afd1c5e",
+      "bytes": 247005
+    },
+    {
+      "file": "Layer_Coat.png",
+      "sha256": "f9d996046531793f61cb5b3e2c8fe60c2cffeb4656107fec3f2877ccf5b2d69a",
+      "bytes": 253626
+    },
+    {
+      "file": "Layer_SkeletonOverlay.png",
+      "sha256": "73d49ff574fba22305f22623caa770b2246b4e99a8d5943a2ddc2b3c92a7539a",
+      "bytes": 208057
+    },
+    {
+      "file": "Layer_MuscleOverlay.png",
+      "sha256": "40aaba42b3e761b17a207fd50b0eacaef35f8c5743c08acb119315324cb0a9e0",
+      "bytes": 215985
+    }
+  ],
+  "limits": "Rendered from the actual authored Blender meshes and rig before USD export. Lighting and the board prop belong to the proof scene. These are not RealityKit screenshots, native playback validation, or physical-device performance evidence."
+}

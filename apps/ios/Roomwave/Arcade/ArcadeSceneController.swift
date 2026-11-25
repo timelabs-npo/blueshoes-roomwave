@@ -26,6 +26,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
 
     private let arView: ARView
     private let camera = PerspectiveCamera()
+    private let boardElevation: Float = -0.032
     private var anchor: AnchorEntity?
     private var course: CompiledSurfCourse?
     private var art: ArcadeGeometry.CourseArt?
@@ -101,15 +102,20 @@ final class ArcadeSceneController: ArcadeSceneDriving {
             // foot + 0.1...0.9 body band and foot + 0.5 ring target.
             candidateAvatar.root.scale = SIMD3(repeating: 1)
 
-            let boardMesh = MeshResource.generateBox(size: SIMD3<Float>(0.55, 0.065, 1.35), cornerRadius: 0.025)
+            let boardMesh = try ArcadeGeometry.surfboardHull()
             let candidateBoard = ModelEntity(mesh: boardMesh,
-                                            materials: [SimpleMaterial(color: UIColor(white: 0.88, alpha: 1),
-                                                                       roughness: 0.28, isMetallic: true)])
-            candidateBoard.position.y = 0.025
+                                            materials: [SimpleMaterial(color: ArcadeGeometry.rgb(0.025, 0.12, 0.17),
+                                                                       roughness: 0.36, isMetallic: true)])
+            // Deck centre is 0.003 m above the absolute foot, just beneath the
+            // bundled boot sole plus the helper's minimum 0.008 m visual lift.
+            candidateBoard.position.y = boardElevation
             candidateAvatar.root.addChild(candidateBoard)
-            let glow = ModelEntity(mesh: .generateBox(size: SIMD3<Float>(0.61, 0.018, 1.28), cornerRadius: 0.008),
+            let inlay = ModelEntity(mesh: try ArcadeGeometry.surfboardInlay(),
+                                    materials: [UnlitMaterial(color: ArcadeGeometry.rgb(0.40, 0.94, 1))])
+            candidateBoard.addChild(inlay)
+            let glow = ModelEntity(mesh: try ArcadeGeometry.surfboardRim(),
                                    materials: [UnlitMaterial(color: ArcadeGeometry.cyan)])
-            glow.position.y = 0.003
+            glow.position.y = boardElevation - 0.001
             candidateAvatar.root.addChild(glow)
             // A low transparent contact patch; its position stays on the road in flight.
             var shadowMaterial = UnlitMaterial(color: .black)
@@ -217,6 +223,20 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         effects.update(deltaTime: dt, rider: foot, forward: forward, airborne: !state.grounded,
                        speed: Float(state.speed), reducedMotion: reducedMotion)
         updateEncounters(distance: state.distance, cursor: state.encounterCursor)
+        if state.phase != .running {
+            // A terminal run freezes at impact. Remove only the nearby foreground
+            // hazard art from that frozen composition; scoring/collision stay in core.
+            // Rewind/preview resets the visibility range and restores every hazard.
+            if let art {
+                for index in visibleEncounters {
+                    let encounter = art.encounters[index].encounter
+                    if (encounter.kind == .barrier || encounter.kind == .ceiling),
+                       encounter.distance <= state.distance + 4 {
+                        art.encounters[index].entity.isEnabled = false
+                    }
+                }
+            }
+        }
         updateGhost(ghost, course: course)
         followCamera(foot: foot, road: road, forward: flatForward, distance: state.distance,
                      speed: speedFraction, mode: .gameplay, dt: dt,
@@ -400,7 +420,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
     private func updateGhost(_ state: SurfState?, course: CompiledSurfCourse) {
         guard let state, state.distance.isFinite, state.height.isFinite else { ghostBoard?.isEnabled = false; return }
         let pose = course.pose(at: state.distance)
-        ghostBoard?.position = SIMD3(Float(pose.center.x), Float(state.height) + 0.025, Float(pose.center.z))
+        ghostBoard?.position = SIMD3(Float(pose.center.x), Float(state.height) + boardElevation, Float(pose.center.z))
         ghostBoard?.orientation = ArcadeGeometry.yaw(for: ArcadeGeometry.vector(pose.forward))
         ghostBoard?.scale = SIMD3(repeating: 1)
         ghostBoard?.isEnabled = true

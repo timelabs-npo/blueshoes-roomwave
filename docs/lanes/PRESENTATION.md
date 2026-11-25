@@ -86,12 +86,13 @@ phase advancement, and reduces bursts/wake density; necessary follow and gamepla
 compression remain. Preview uses distance zero of the actual loaded course,
 a poised bundled rider and bounded slow home drift (none with reduced motion).
 
-Road/terrain/board use `SimpleMaterial` under directional lights; edges, rings,
-markings, horizon and particles use `UnlitMaterial`. These are self-lit colors,
-not a claim of HDR bloom, physical fog or custom post-processing. Transparent
-contact/ghost/horizon materials explicitly select transparent blending and their
-respective opacity values. No image assets, textures or
-third-party art/audio were added.
+The initial road/terrain used `SimpleMaterial`; the native-evidence art pass
+below replaces them with controlled `UnlitMaterial` biome colors and batched
+facet/panel shades. The board and avatar retain lighting. Edges, rings, markings,
+distant silhouettes and particles use self-lit colors, without a claim of HDR
+bloom, physical fog or custom post-processing. Contact/ghost materials explicitly
+select transparent blending. No image assets, textures or third-party art/audio
+were added by this lane.
 
 ## Lifetime and integration
 
@@ -238,3 +239,123 @@ Next gate: capture the real updated home/play/retry views in all three biomes;
 check the rider and full board above home controls, landings through crests,
 ceiling/barrier occlusion behind the rider, peak jumps and reduced motion. The
 coordinator owns the separate home interruption-message correction and native CI.
+
+## Native-evidence art correction
+
+Correction baseline: `54dbb3422794025030a03f535b68c6764fbfaaf7`, branch
+`fix/arcade-art-pass`. The coordinator authorized a bounded 20-minute pass starting
+2026-11-25 20:04:03 UTC, restricted to `ArcadeGeometry.swift`,
+`ArcadeSceneController.swift` and this note. The coordinator separately owns the
+avatar asset/animation. No account calls, dependency installation, generated
+screenshots, native workflow changes or pushes occurred in this pass.
+
+### Observed evidence motivating the change
+
+The reviewer first read the evidence directory and attachment manifest from the
+successful native run `45686764139`, head `41ed282`, then visually inspected four
+actual ARView frames (`home-dawn.png`, `airborne.png`, `landing.png`, `results.png`)
+and seven UI attachments: all three homes, release/air, landing, result and retry.
+
+The camera correction is visibly effective: the complete rider/board sits above
+home controls, gameplay keeps the rider near the lower middle, and HUD/tutorial
+text leaves the action clear. The former interruption message is absent on home.
+The original excess-sky framing is resolved. The images also expose remaining
+art problems: broad grey roadway; repeated two-face pyramids and disconnected
+apron wedges; a rectangular silver board; an exposed road-start cut behind the
+home rider; and a nearby coral hazard covering the rider across the frozen result
+scene. Result actions remain readable. These screenshots demonstrate rendering
+and layout, not human enjoyment, animation quality, device performance or a
+premium-quality acceptance pass.
+
+Best UI attachments under the coordinator's downloaded evidence directory:
+
+- Home: `ui-attachments/911D8AC3-AAD0-41E5-9DDF-5A4C0EDC0861.png`.
+- Playing/landing with a visible upcoming hazard:
+  `ui-attachments/21A00B30-A47B-4D72-B0D1-5BF514D9706E.png`.
+- Result: `ui-attachments/651D5A0F-E3F4-4C8E-80AF-55FB5BB63274.png`.
+
+### Implemented art changes
+
+- Road: controlled dark blue/teal biome base colors, quiet shoulder bands,
+  alternating 18-unit surface panels, short 6-unit shoulder cadence marks, and a
+  0.28-unit visible edge skirt. Geometry follows the same sampled centerline and
+  width; the center remains free of decorative objects. The additional surface
+  detail is load-time mesh data in four batches. Existing cyan edges and boost
+  chevrons remain distinct. A 16-unit visual apron extends only behind distance
+  zero to support the home composition; the playable course and simulation
+  domain do not extend backwards.
+- Landscape: irregular six-sided crags with shoulder and crown rings, asymmetric
+  lean, varied footprints, occasional broad summits, and four controlled facet
+  colors. Orbit retains detached lower tips; Midnight uses tall narrow forms.
+  Joined terraces replace the disconnected apron wedges in Dawn and Midnight.
+  Every decorative triangle still passes the same conservative projected road
+  corridor test, including the launch apron. The test now traverses original
+  linear sample spans with maximum endpoint width, preserving or increasing
+  clearance while avoiding a dense station scan for each new facet.
+- Distance: three low-contrast, differently colored silhouette batches create
+  atmospheric separation. Their colors and geometry are explicit; this is not
+  an assertion of a native fog API. The sun/planet position and size are adjusted
+  for the repaired portrait view. The old flat horizontal horizon bar is removed.
+- Board: an eight-point tapered foil within the previous 0.55 by 1.35 footprint,
+  with a raised nose, bevelled hull, graphite/teal material, cyan rim and a small
+  energy inlay. The same cached hull supplies the ghost; a separate 16-triangle
+  rim follows the hull outline without filling its deck. The new asset's boot
+  sole is -0.004818 m and the helper adds at least 0.008 m, so the board elevation
+  is -0.032 m: the deck centre is 0.003 m above absolute foot, immediately below
+  the minimum visual sole at 0.003182 m. The rim edge is 0.0015 m above the road.
+  Inlay vertices sample the actual triangular deck with a 0.001 m lift; a flat
+  inlay was rejected by the height check because it intersected the raised nose.
+  Ghost board elevation uses the same constant. Avatar root scale,
+  hierarchy, skeleton, layers and absolute foot placement remain untouched.
+- Terminal composition: after the core reports `.crashed` or `.finished`, nearby
+  barrier/ceiling art at or behind `state.distance + 4` is disabled so the frozen
+  result view does not hide the rider behind a giant foreground panel. Active
+  gameplay rendering and all encounter geometry/collision remain unchanged.
+  Rewind/preview already clears the visible range, so these hazards reappear on
+  retry or return home without a separate persistent visibility flag.
+
+### Checks and remaining gate
+
+Executed `git diff --check`, a mathematical winding check for all 32 foil
+triangles and both road-skirt/terrace sides, and finite/nondegenerate checks for
+12,672 representative crag triangles. These are geometry calculations, not a
+substitute for native rendering. An exact source comparison against the baseline
+confirmed no change to `followCamera`, `makeEncounter`, or
+`triangleTouchesCorridor`. Only the three assigned files are changed.
+
+For the authored courses, the new meshes use 1,082/1,172/1,262 ribbon stations
+including the visual launch apron. Decorative crags and terraces have conservative
+pre-clearance upper counts of 4,348/4,752/4,284 triangles for Dawn/Orbit/Midnight,
+respectively, in four material batches. The three distant silhouettes add 72
+triangles. The foil has 32 triangles and the inlay three. These bounded counts
+are source-derived; they are not a measured frame-rate or memory claim. There
+are no new per-frame mesh builders or scene subscriptions.
+
+The `41ed282` images show the state before this art correction. This pass has not
+been compiled or rendered locally. Native acceptance still needs the updated
+three-course homes, airborne/landing views, a terminal result with the nearby
+hazard cleared, and a retry showing restored hazard visibility. Verify road/ramp
+legibility, material contrast, foil/feet contact, landmark visibility and the
+actual animated avatar together. Human input and device profiling remain separate
+gates; no award-level result is claimed from source changes or automated images.
+
+### Narrow road-layering integration correction
+
+The coordinator identified an opaque layering conflict before integration:
+surface panels at +0.006 m stood above the new +0.003 m foil deck. The follow-up
+replaces the full-width base plus raised overlays with adjacent material regions
+at the exact sampled road surface. Each interval covers the full width once:
+outer base, shoulder, centre base-or-pulse, shoulder, outer base. Shared vertices
+follow the same station centers/right vectors on ramps and turns; the material
+partition adds no cross-grade or height offset and has no overlapping coplanar
+faces. The number of road material batches is unchanged because the base batch
+moves into this partition.
+
+The remaining central boost marking's visual lift is reduced from 0.018 to
+0.0005 m, below the 0.0015 m rim and 0.003 m deck at the rider centre. Its encounter
+band, footprint, timing and scoring are untouched. Shoulder cadence ticks and
+edge lights remain outside the central rider footprint (cadence begins at 38%
+of road width on either side). No avatar, collision or camera change was made.
+`git diff --check` passed. Native captures remain responsible for crest/foot
+contact and the distant appearance of the thin boost marking; no broader visual
+pass or additional native verification is claimed by this correction.

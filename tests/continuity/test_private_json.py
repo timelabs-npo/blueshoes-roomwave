@@ -140,13 +140,15 @@ class PrivateJSONTests(unittest.TestCase):
 
     def test_malformed_json_never_exposes_values_or_the_private_path(self):
         with tempfile.TemporaryDirectory() as directory:
-            secret = 'PRIVATE_VALUE_SENTINEL_92b47@example.invalid'
-            path = self.write(directory, ('{"email":"' + secret + '", invalid}').encode(),
+            # Deliberately synthetic marker on the reserved .invalid domain;
+            # this fixture contains no account data or credential.
+            fixture_marker = 'PRIVATE_VALUE_SENTINEL_92b47@example.invalid'
+            path = self.write(directory, ('{"email":"' + fixture_marker + '", invalid}').encode(),
                               name='PRIVATE_PATH_SENTINEL.json')
             result = self.read(path)
             self.assert_blocked(result)
             output = json.dumps(result)
-            self.assertNotIn(secret, output)
+            self.assertNotIn(fixture_marker, output)
             self.assertNotIn(str(path), output)
             self.assertNotIn('PRIVATE_PATH_SENTINEL', output)
 

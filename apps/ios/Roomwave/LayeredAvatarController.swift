@@ -98,7 +98,10 @@ final class LayeredAvatarController {
             motionContainer.addChild(asset)
             bundledAsset = asset
             layers = found
-            coatRestPoses = (found[.coat] ?? []).map { ($0, $0.transform) }
+            // The imported Coat is a complete skinned outfit (including trousers
+            // and hood). Its authored tail joint supplies cloth-like motion.
+            // Rotating that whole SkelRoot would detach the outfit from Skin.
+            coatRestPoses.removeAll()
             applyLayerVisibility() // Includes choices made while the load was suspended.
 
             // Four independent SkelRoots may expose one clip per layer or a
@@ -156,8 +159,8 @@ final class LayeredAvatarController {
         let squash = bounce * 0.012 * pace
         motionContainer.scale = SIMD3(1 + squash * 0.5, 1 - squash, 1 + squash * 0.5)
 
-        // A small rigid coat accent, not cloth simulation. Always start from the
-        // authored local transform, so repeated calls cannot accumulate drift.
+        // Only the procedural fallback has a rigid coat panel. The bundled
+        // outfit keeps its rig transform and uses its embedded skinned animation.
         for pose in coatRestPoses {
             var transform = pose.transform
             transform.rotation = pose.transform.rotation *

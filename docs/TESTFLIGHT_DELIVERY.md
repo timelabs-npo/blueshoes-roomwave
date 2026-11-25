@@ -4,6 +4,22 @@ The active arcade rebuild is **0.3.0**. See [arcade acceptance](ARCADE_ACCEPTANC
 
 The user authorized replacing the existing Molecular/Molecule Foundry beta with Roomwave. Roomwave is delivered under the existing Apple identity below. This workflow uploads a TestFlight beta; it does not submit or publish an App Store production update.
 
+## Current v0.3 release procedure
+
+The active app is **Roomwave · Slipstream 0.3.0**. Corrected native run [45686764139](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45686764139) passed at source `41ed282b47bc2231f5b444914f1c8389e5635859`. Later source changes retain their own validation gates; that run must not be relabeled as evidence for another commit.
+
+Dispatch `testflight.yml` once from reviewed `main` with the exact `expected_sha`, `export_ipa=true` and `upload=true`. Read the allocated GitHub run number/attempt and claim the resulting `(1000 + run_number).run_attempt` build in the authoritative continuity store **before approving the protected release job**. Do not guess the next run number. The main-only environment and required reviewer remain in place.
+
+After signing/upload, the workflow observes the exact Apple build and calls [internal finalization](INTERNAL_BETA.md) with the actual IPA identity receipt. It updates truthful beta metadata and associates only the exact build with the existing internal group. If processing or activation remains pending, reconcile that same UUID; do not upload again to poll it. Credentials and signing material remain protected.
+
+The real external Beta App Review contact was absent in the inspected Apple record. First name, last name, email and international phone must be supplied privately or entered directly by the owner. [External beta operations](PUBLIC_BETA.md) keeps exact-build review and public-link checks separate from internal availability. No public link, invitation or community post is claimed.
+
+The installed app name is Roomwave. The Apple listing was still **Molecule Foundry**. A guarded name-only PATCH requesting **Roomwave Slipstream** returned HTTP **403** at 20:06:08 UTC on 25 November 2026. No successful rename is claimed. Authorized access to that exact metadata operation, or an owner-performed change, is required. This denial is not bypassed with a different identity or broader mutation.
+
+## Archived 0.2 pilot reference
+
+**Everything below records the earlier pilot and its original procedure. Do not use its 0.2.0 payloads to finalize the new arcade.** The active procedure is above; full historical source remains on [archive/20261125-pilot-1002-1](https://github.com/timelabs-npo/blueshoes-roomwave/tree/archive/20261125-pilot-1002-1).
+
 | Field | Verified identity |
 | --- | --- |
 | App Store Connect record | Molecule Foundry |
