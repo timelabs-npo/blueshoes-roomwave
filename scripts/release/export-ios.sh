@@ -12,9 +12,7 @@ for name in DEVELOPMENT_TEAM PRODUCT_BUNDLE_IDENTIFIER PROVISIONING_PROFILE_NAME
 done
 [[ "$PRODUCT_BUNDLE_IDENTIFIER" == org.timelabs.moleculefoundry ]] || { echo 'Unexpected app identity.'; exit 2; }
 [[ "$DEVELOPMENT_TEAM" == 398XACWZ7G ]] || { echo 'Unexpected Apple team.'; exit 2; }
-[[ "${GITHUB_RUN_NUMBER:-}" =~ ^[1-9][0-9]*$ && "${GITHUB_RUN_ATTEMPT:-}" =~ ^[1-9][0-9]*$ ]] || { echo 'Invalid workflow build number.'; exit 2; }
-(( GITHUB_RUN_NUMBER <= 8999 && GITHUB_RUN_ATTEMPT <= 99 )) || { echo 'Workflow build number exceeds Apple version component limits.'; exit 2; }
-BUILD_NUMBER="$((1000 + GITHUB_RUN_NUMBER)).${GITHUB_RUN_ATTEMPT}"
+BUILD_NUMBER="$(python3 scripts/release/release-allocation.py build)"
 export ROOMWAVE_RELEASE_BUILD="$BUILD_NUMBER"
 mkdir -p build/release/export
 if [[ "${UPLOAD_TO_TESTFLIGHT:-false}" == true ]]; then
@@ -101,48 +99,6 @@ fi
 IPA=$(find build/release/export -maxdepth 1 -name '*.ipa' -print -quit)
 [[ -n "$IPA" ]] || { echo 'Signed IPA not produced.'; exit 2; }
 python3 scripts/release/verify-app.py "$IPA" --build "$BUILD_NUMBER" > build/release/ipa-identity.json
-export ROOMWAVE_RELEASE_IPA="$IPA"
-export ROOMWAVE_UPLOAD_ACCEPTED=false
-if [[ "${UPLOAD_TO_TESTFLIGHT:-false}" == true ]]; then
-  mkdir -p "$ROOMWAVE_SIGNING_WORK/private_keys"
-  python3 - <<'PY'
-import os,base64
-from pathlib import Path
-root=Path(os.environ['ROOMWAVE_SIGNING_WORK'])/'private_keys'
-(root/('AuthKey_'+os.environ['ASC_KEY_ID']+'.p8')).write_bytes(base64.b64decode(os.environ['ASC_PRIVATE_KEY_P8_BASE64'],validate=True))
-PY
-  if ! API_PRIVATE_KEYS_DIR="$ROOMWAVE_SIGNING_WORK/private_keys" xcrun altool --upload-app --type ios \
-    -f "$IPA" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" > build/release/upload.log 2>&1; then
-    tail -n 70 build/release/upload.log; exit 1
-  fi
-  export ROOMWAVE_UPLOAD_ACCEPTED=true
-fi
-python3 - <<'PY'
-import datetime,hashlib,json,os
-from pathlib import Path
-ipa=Path(os.environ['ROOMWAVE_RELEASE_IPA'])
-receipt={'commit':os.environ['GITHUB_SHA'],'app_store_app_id':'6837899703','bundle_identifier':'org.timelabs.moleculefoundry','version':os.environ['ROOMWAVE_RELEASE_VERSION'],
-         'build':os.environ['ROOMWAVE_RELEASE_BUILD'],'signature_verified':True,'ipa_sha256':hashlib.sha256(ipa.read_bytes()).hexdigest(),
-         'upload_accepted':os.environ['ROOMWAVE_UPLOAD_ACCEPTED']=='true','tester_access_verified':False,
-         'observed_utc':datetime.datetime.now(datetime.timezone.utc).isoformat()}
-Path('build/release/release-receipt.json').write_text(json.dumps(receipt,indent=2)+'\n');print(json.dumps(receipt))
-PY
-if [[ "$ROOMWAVE_UPLOAD_ACCEPTED" == true ]]; then
-  node scripts/release/apple-status.mjs processing
-  ROOMWAVE_PROCESSED_BUILD_ID=$(node --input-type=module -e '
-    import {readFileSync} from "node:fs";
-    const receipt = JSON.parse(readFileSync("build/release/apple-processing.json", "utf8"));
-    if (receipt.apple_processing === "VALID") {
-      if (!/^[0-9a-f-]{36}$/i.test(receipt.apple_build_id || "")) throw new Error("Missing processed build UUID");
-      process.stdout.write(receipt.apple_build_id);
-    }
-  ')
-  if [[ -n "$ROOMWAVE_PROCESSED_BUILD_ID" ]]; then
-    node scripts/release/finalize-internal.mjs --apply \
-      --build-id "$ROOMWAVE_PROCESSED_BUILD_ID" \
-      --compiled-identity-receipt build/release/ipa-identity.json \
-      --state-dir build/release/testflight-operations
-  else
-    echo 'Apple processing remains pending. Reconcile this upload before finalizing internal access; do not re-upload.'
-  fi
-fi
+# Upload occurs in a separate step only after its immutable intent and signed
+# binary have been preserved as a GitHub artifact. This stage never uploads.
+python3 scripts/release/release-allocation.py record-export

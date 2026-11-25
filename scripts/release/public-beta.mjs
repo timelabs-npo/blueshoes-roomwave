@@ -15,6 +15,8 @@ export const API_ORIGIN = 'https://api.appstoreconnect.apple.com';
 export const MARKETING_URL = 'https://github.com/timelabs-npo/blueshoes-roomwave';
 export const PRIVACY_URL = `${MARKETING_URL}/blob/main/docs/PRIVACY.md`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SOURCE_SHA = /^[0-9a-f]{40}$/i;
+const DIGEST = /^[0-9a-f]{64}$/i;
 const APPROVED_EXTERNAL = new Set(['BETA_APPROVED', 'IN_BETA_TESTING']);
 const ACTIONS = new Set(['preflight', 'stage', 'submit', 'enable-public-link']);
 
@@ -54,11 +56,51 @@ export function validateContent(content) {
 }
 
 export function validContact(contact) {
+  const phone = typeof contact?.phone === 'string' ? contact.phone.trim() : '';
+  const international = /^\+[1-9][0-9 ()-]{6,24}$/.test(phone)
+    && /^\+[1-9][0-9]{7,14}$/.test(phone.replace(/[ ()-]/g, ''));
   return typeof contact?.firstName === 'string' && !!contact.firstName.trim()
     && typeof contact?.lastName === 'string' && !!contact.lastName.trim()
     && typeof contact?.email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email)
-    && typeof contact?.phone === 'string' && /^\+[1-9][0-9 ()-]{6,24}$/.test(contact.phone)
+    && international
     && Object.values(contact).every(value => typeof value !== 'string' || value.length <= 250);
+}
+
+// These are protected operator inputs, not self-authenticating attestations.
+// The operator must retrieve all three receipts from the trusted release run
+// for the independently reviewed source SHA. Never synthesize missing receipts.
+export function verifyPromotionEvidence({ sourceSHA, compiledIdentity, releaseReceipt, processingReceipt }, buildID) {
+  ensure(UUID.test(buildID ?? ''), 'BLOCKED_INPUT', 'An exact Apple build UUID is required');
+  ensure(typeof sourceSHA === 'string' && SOURCE_SHA.test(sourceSHA),
+    'BLOCKED_PROMOTION_EVIDENCE', 'An independently reviewed full source SHA is required');
+  ensure(compiledIdentity && releaseReceipt && processingReceipt,
+    'BLOCKED_PROMOTION_EVIDENCE', 'Compiled identity, accepted release and VALID Apple processing receipts are required');
+  const build = releaseReceipt.build;
+  ensure(typeof build === 'string' && /^[0-9]+(?:\.[0-9]+){0,2}$/.test(build)
+    && releaseReceipt.commit === sourceSHA && releaseReceipt.app_store_app_id === APP
+    && releaseReceipt.bundle_identifier === BUNDLE && releaseReceipt.version === VERSION
+    && releaseReceipt.signature_verified === true && releaseReceipt.upload_accepted === true
+    && typeof releaseReceipt.ipa_sha256 === 'string' && DIGEST.test(releaseReceipt.ipa_sha256),
+    'BLOCKED_PROMOTION_EVIDENCE', 'Accepted signed release receipt must match the reviewed source, app, bundle, version and build and contain an IPA digest');
+  ensure(compiledIdentity.bundle === BUNDLE && compiledIdentity.version === VERSION && compiledIdentity.build === build
+    && compiledIdentity.identity_verified === true && compiledIdentity.usesNonExemptEncryption === false,
+    'BLOCKED_PROMOTION_EVIDENCE', 'Compiled identity must match the exact release and its explicit encryption declaration');
+  ensure(processingReceipt.app_id === APP && processingReceipt.version === VERSION && processingReceipt.build === build
+    && processingReceipt.apple_build_id === buildID && processingReceipt.apple_processing === 'VALID',
+    'BLOCKED_PROMOTION_EVIDENCE', 'Processing receipt must bind the accepted release to this exact VALID Apple build UUID');
+  // Existing producers may add these bindings. If supplied, none may conflict.
+  const optional = { source_sha: sourceSHA, commit: sourceSHA, app_id: APP, app_store_app_id: APP,
+    bundle: BUNDLE, bundle_id: BUNDLE, bundle_identifier: BUNDLE, apple_build_id: buildID,
+    ipa_sha256: releaseReceipt.ipa_sha256 };
+  for (const receipt of [compiledIdentity, releaseReceipt, processingReceipt]) {
+    for (const [key, expected] of Object.entries(optional)) {
+      ensure(!Object.hasOwn(receipt, key) || receipt[key] === expected,
+        'BLOCKED_PROMOTION_EVIDENCE', 'An optional receipt identity binding conflicts with the reviewed release');
+    }
+  }
+  return Object.freeze({ source_sha: sourceSHA, app_id: APP, bundle_id: BUNDLE, version: VERSION,
+    build, apple_build_id: buildID, ipa_sha256: releaseReceipt.ipa_sha256,
+    promotion_evidence_verified: true, receipt_provenance: 'operator-trusted-release-artifact' });
 }
 
 function storedContact(review) {
@@ -256,6 +298,7 @@ function sanitized(snapshot, action, apply) {
 }
 
 export async function execute({ api, journal, buildID, action = 'preflight', apply = false, contact = null,
+  sourceSHA, compiledIdentity, releaseReceipt, processingReceipt,
   content = DEFAULT_CONTENT, urlCheck = checkPublicURLs }) {
   let report = { schema_version: 1, observed_at: stamp(), action, apply_requested: apply, app_id: APP, bundle_id: BUNDLE,
     version: VERSION, apple_build_id: UUID.test(buildID ?? '') ? buildID : null, mutations: [], blockers: [], tester_access_verified: false };
@@ -263,8 +306,15 @@ export async function execute({ api, journal, buildID, action = 'preflight', app
     ensure(ACTIONS.has(action), 'BLOCKED_INPUT', 'Unknown public-beta action');
     ensure(!(action === 'preflight' && apply), 'BLOCKED_INPUT', 'Preflight never accepts --apply');
     content = validateContent(content);
-    let snapshot = await inspect(api, buildID);
-    report = sanitized(snapshot, action, apply);
+    const promotion = verifyPromotionEvidence({ sourceSHA, compiledIdentity, releaseReceipt, processingReceipt }, buildID);
+    const inspectBound = async () => {
+      const value = await inspect(api, buildID);
+      ensure(attrs(value.build).version === promotion.build,
+        'BLOCKED_PROMOTION_EVIDENCE', 'Live Apple build number differs from the reviewed compiled/upload/processing receipts');
+      return value;
+    };
+    let snapshot = await inspectBound();
+    report = { ...sanitized(snapshot, action, apply), ...promotion };
     const groupKey = `group:${APP}:${GROUP_NAME}`;
     const submitKey = `submission:${buildID}`;
     if (snapshot.group) journal?.observe(groupKey, snapshot.group.id);
@@ -348,7 +398,7 @@ export async function execute({ api, journal, buildID, action = 'preflight', app
       if (!snapshot.groupBuilds.some(row => row.id === buildID)) {
         await post(`associate:${group.id}:${buildID}`, `betaGroups/${id(group.id)}/relationships/builds`, { data: [{ type: 'builds', id: buildID }] });
       }
-      snapshot = await inspect(api, buildID);
+      snapshot = await inspectBound();
       ensure(staged(snapshot, content) && attrs(snapshot.group).publicLinkEnabled === false,
         'BLOCKED_READBACK', 'Staging response did not produce the expected private group and metadata readback');
       report.state = 'STAGED_PRIVATE';
@@ -364,22 +414,22 @@ export async function execute({ api, journal, buildID, action = 'preflight', app
           { build: relationship('builds', buildID) }))).data;
         ensure(submitted?.id, 'BLOCKED_RESPONSE', 'Submission response lacked an ID; reconcile without submitting again');
         report.review_submission_id = submitted.id;
-        snapshot = await inspect(api, buildID);
+        snapshot = await inspectBound();
         ensure(snapshot.submission?.id === submitted.id, 'BLOCKED_READBACK', 'Submission relationship readback is not yet visible; preserve the journal and reconcile');
       }
       report.state = approved(snapshot) ? 'EXTERNAL_APPROVED' : 'EXTERNAL_REVIEW_PENDING';
     } else {
       // URL checks and earlier reads may take time; refresh exact eligibility/approval before enabling.
-      snapshot = await inspect(api, buildID);
+      snapshot = await inspectBound();
       ensure(staged(snapshot, content), 'BLOCKED_METADATA', 'Exact staged group, metadata and build are required');
       ensure(approved(snapshot), 'BLOCKED_REVIEW', 'Exact build needs an APPROVED review submission and external BETA_APPROVED or IN_BETA_TESTING state');
       if (attrs(snapshot.group).publicLinkEnabled !== true) await mutation(`betaGroups/${id(snapshot.group.id)}`,
         resource('betaGroups', snapshot.group.id, { publicLinkEnabled: true, publicLinkLimitEnabled: true, publicLinkLimit: CAP }));
-      snapshot = await inspect(api, buildID);
-      ensure(approved(snapshot) && attrs(snapshot.group).publicLinkEnabled === true
+      snapshot = await inspectBound();
+      ensure(staged(snapshot, content) && approved(snapshot) && attrs(snapshot.group).publicLinkEnabled === true
         && attrs(snapshot.group).publicLinkLimitEnabled === true && attrs(snapshot.group).publicLinkLimit === CAP
         && /^https:\/\/testflight\.apple\.com\/join\/[A-Za-z0-9]+$/.test(attrs(snapshot.group).publicLink ?? ''),
-        'BLOCKED_READBACK', 'An approved exact build and enabled capped public URL were not observed in readback');
+        'BLOCKED_READBACK', 'Exact staged metadata, build membership, approval and enabled capped public URL were not observed together in readback');
       report.state = 'PUBLIC_LINK_ENABLED';
       report.public_url = attrs(snapshot.group).publicLink;
       report.external_testing_active = attrs(snapshot.detail).externalBuildState === 'IN_BETA_TESTING';
@@ -444,23 +494,30 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     ensure(Number(process.versions.node.split('.')[0]) >= 22, 'BLOCKED_RUNTIME', 'Node 22 or later is required');
     if (argv.includes('--help')) {
-      console.log('public-beta.mjs [preflight|stage|submit|enable-public-link] --build-id UUID [--apply] [--contact-file PRIVATE_JSON] [--content-file REVIEWED_JSON] [--state-dir PRIVATE_DIRECTORY]');
+      console.log('public-beta.mjs [preflight|stage|submit|enable-public-link] --build-id UUID --source-sha FULL_SHA --compiled-identity-receipt PATH --release-receipt PATH --processing-receipt PATH [--apply] [--contact-file PRIVATE_JSON] [--content-file REVIEWED_JSON] [--state-dir PRIVATE_DIRECTORY]');
       return 0;
     }
     if (argv[0] && !argv[0].startsWith('--')) options.action = argv.shift();
     for (let index = 0; index < argv.length; index += 1) {
       const flag = argv[index];
       if (flag === '--apply') { options.apply = true; continue; }
-      const keys = { '--build-id': 'buildID', '--contact-file': 'contactFile', '--content-file': 'contentFile', '--state-dir': 'stateDir' };
+      const keys = { '--build-id': 'buildID', '--source-sha': 'sourceSHA', '--compiled-identity-receipt': 'identityPath',
+        '--release-receipt': 'releasePath', '--processing-receipt': 'processingPath',
+        '--contact-file': 'contactFile', '--content-file': 'contentFile', '--state-dir': 'stateDir' };
       ensure(keys[flag] && argv[index + 1] && !argv[index + 1].startsWith('--'), 'BLOCKED_INPUT', 'Unknown option or missing option value');
       options[keys[flag]] = argv[++index];
     }
     ensure(UUID.test(options.buildID ?? ''), 'BLOCKED_INPUT', 'An exact Apple build UUID is required');
+    ensure(options.identityPath && options.releasePath && options.processingPath,
+      'BLOCKED_PROMOTION_EVIDENCE', 'Paths to compiled identity, accepted release and Apple processing receipts are required');
+    const evidence = { sourceSHA: options.sourceSHA, compiledIdentity: privateJSON(options.identityPath),
+      releaseReceipt: privateJSON(options.releasePath), processingReceipt: privateJSON(options.processingPath) };
+    verifyPromotionEvidence(evidence, options.buildID);
     const api = protectedClient();
     const contact = options.contactFile ? privateJSON(options.contactFile, true) : null;
     const content = options.contentFile ? privateJSON(options.contentFile) : DEFAULT_CONTENT;
     journal = new Journal(options.stateDir);
-    const report = await execute({ ...options, api, journal, contact, content });
+    const report = await execute({ ...options, ...evidence, api, journal, contact, content });
     writeAtomic(resolve(options.stateDir, `receipt-${options.buildID}.json`), report);
     console.log(JSON.stringify(report, null, 2));
     return report.blockers.length ? 2 : 0;

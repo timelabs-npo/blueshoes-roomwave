@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime as dt
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -702,26 +703,131 @@ def record_release(store, record):
         return old
 
 
-def record_workflow(store, record):
-    if record.get("schema_version") != 1 or record.get("origin") != "github_actions":
+WORKFLOW_PHASE = {"requested": 0, "pending": 0, "waiting": 0, "queued": 0,
+                  "in_progress": 1, "completed": 2}
+WORKFLOW_CONCLUSIONS = {"success", "failure", "neutral", "cancelled", "skipped", "timed_out",
+                        "action_required", "stale", "startup_failure"}
+WORKFLOW_ATTEMPT_EVIDENCE = {"workflow_run_payload", "github_run_environment",
+                             "github_api_latest", "github_api_attempt"}
+
+
+def workflow_observation(record):
+    """Normalize without inventing attempt numbers or API update timestamps."""
+    if record.get("schema_version") not in (1, 2) or record.get("origin") != "github_actions":
         raise Problem("Expected a GitHub Actions observation receipt")
-    if not SHA.fullmatch(record.get("source_sha", "")) or not isinstance(record.get("workflow_run_id"), int):
-        raise Problem("Workflow observation requires an exact source SHA and numeric run ID")
+    run_id = record.get("workflow_run_id")
+    if (not isinstance(record.get("source_sha"), str) or not SHA.fullmatch(record["source_sha"])
+            or type(run_id) is not int or run_id <= 0):
+        raise Problem("Workflow observation requires an exact source SHA and positive numeric run ID")
     instant(record.get("observed_at"))
     allowed = ("schema_version", "origin", "source_sha", "workflow_run_id", "workflow_name", "conclusion",
-               "observed_at", "trigger", "evidence_url")
+               "observed_at", "trigger", "evidence_url", "run_attempt", "attempt_evidence",
+               "run_status", "run_updated_at")
     item = {key: record.get(key) for key in allowed}
+    attempt = item["run_attempt"]
+    if attempt is None:
+        if record["schema_version"] != 1:
+            raise Problem("Schema-2 workflow receipts require an observed run_attempt")
+        item["attempt_evidence"] = "legacy_unproven"
+    else:
+        if type(attempt) is not int or attempt < 1:
+            raise Problem("Workflow run_attempt must be a positive integer")
+        if item["attempt_evidence"] not in WORKFLOW_ATTEMPT_EVIDENCE:
+            raise Problem("Workflow attempt requires its GitHub payload, environment or API evidence source")
+        if item["run_status"] not in WORKFLOW_PHASE:
+            raise Problem("Workflow attempt requires an observed run_status")
+        if item["attempt_evidence"] == "github_run_environment":
+            if (item["run_status"] != "in_progress" or item["run_updated_at"] is not None
+                    or item["conclusion"] != "CONTINUITY_CHECKS_OBSERVED"):
+                raise Problem("Current-job environment cannot attest completion or an API update timestamp")
+        else:
+            instant(item["run_updated_at"])
+            if item["run_status"] == "completed":
+                if item["conclusion"] not in WORKFLOW_CONCLUSIONS:
+                    raise Problem("Completed workflow attempts require a known terminal conclusion")
+            elif item["conclusion"] is not None:
+                raise Problem("Nonterminal workflow attempts cannot carry a terminal conclusion")
+    if item["run_updated_at"] is not None:
+        instant(item["run_updated_at"])
     item["interpretation"] = "Observed workflow event only; no gameplay, native, signing or Apple gate inferred"
+    item["observation_id"] = hashlib.sha256(json.dumps(item, sort_keys=True, separators=(",", ":"),
+                                                       allow_nan=False).encode()).hexdigest()
+    return item
+
+
+def workflow_transition(previous, item):
+    """Freshness is GitHub's update time, not a delayed delivery's receipt time."""
+    if previous["conclusion"] in WORKFLOW_CONCLUSIONS:
+        if item["conclusion"] != previous["conclusion"]:
+            raise Problem("Workflow attempt terminal conclusion is immutable; reconcile an exact newer attempt")
+    if WORKFLOW_PHASE.get(item["run_status"], 0) < WORKFLOW_PHASE.get(previous["run_status"], 0):
+        raise Problem("Workflow attempt status cannot regress")
+    before, after = previous["run_updated_at"], item["run_updated_at"]
+    if before is not None and after is None:
+        raise Problem("Workflow observation lacks freshness evidence for this recorded attempt")
+    if before is not None and after is not None:
+        if instant(after) < instant(before):
+            raise Problem("Stale workflow update timestamp")
+        if (instant(after) == instant(before) and previous["run_status"] != item["run_status"]
+                and WORKFLOW_PHASE.get(item["run_status"], 0) <= WORKFLOW_PHASE.get(previous["run_status"], 0)):
+            raise Problem("Conflicting workflow status at the same update timestamp")
+    # An authoritative newer update can arrive with an older local receipt time.
+    if not (before is not None and after is not None and instant(after) > instant(before)):
+        if instant(item["observed_at"]) < instant(previous["observed_at"]):
+            raise Problem("Stale workflow observation timestamp")
+
+
+def record_workflow(store, record):
+    item = workflow_observation(record)
     with store.writer():
         state = store.read()
-        previous = [entry for entry in state["signals"] if entry["workflow_run_id"] == item["workflow_run_id"]]
-        if previous and previous[0]["source_sha"] != item["source_sha"]:
+        # Additive schema-1 migration occurs only during an explicit import, never status/read.
+        migrating = "workflow_observations" not in state
+        signals = [workflow_observation(entry) for entry in state["signals"]]
+        history = list(state.get("workflow_observations", signals))
+        related = [entry for entry in history if entry["workflow_run_id"] == item["workflow_run_id"]]
+        current = next((entry for entry in signals if entry["workflow_run_id"] == item["workflow_run_id"]), None)
+        if any(entry["source_sha"] != item["source_sha"] for entry in related):
             raise Problem("Workflow run identity cannot change its source SHA")
-        state["signals"] = [entry for entry in state["signals"] if entry["workflow_run_id"] != item["workflow_run_id"]]
-        state["signals"].append(item)
-        state["signals"] = state["signals"][-200:]
+        duplicate = next((entry for entry in related if entry["observation_id"] == item["observation_id"]), None)
+        if duplicate:
+            if migrating:
+                state["signals"], state["workflow_observations"] = signals, history
+                store.save(state)
+            return {**duplicate, "latest_for_run": current["observation_id"] == duplicate["observation_id"]}
+        if current is not None and current["run_attempt"] is not None and item["run_attempt"] is None:
+            raise Problem("Legacy unproven attempt cannot replace a proven workflow attempt")
+        same_attempt = [entry for entry in related if entry["run_attempt"] == item["run_attempt"]]
+        if same_attempt:
+            workflow_transition(same_attempt[-1], item)
+        advance = current is None
+        if current is not None:
+            old_attempt, new_attempt = current["run_attempt"], item["run_attempt"]
+            if new_attempt is None:
+                advance = True
+            elif old_attempt is None:
+                # A legacy event may describe an unknown later rerun. A delayed event
+                # cannot resolve it; obtain a fresh latest-run API observation instead.
+                current_api = (item["attempt_evidence"] == "github_api_latest"
+                               and instant(item["observed_at"]) >= instant(current["observed_at"]))
+                later_event = (item["run_updated_at"] is not None
+                               and instant(item["run_updated_at"]) >= instant(current["observed_at"]))
+                if not (current_api or later_event):
+                    raise Problem("Legacy attempt is unproven; require a fresh latest-run API observation")
+                advance = True
+            else:
+                advance = new_attempt >= old_attempt
+                if (new_attempt > old_attempt and current["run_updated_at"] is not None
+                        and item["run_updated_at"] is not None
+                        and instant(item["run_updated_at"]) < instant(current["run_updated_at"])):
+                    raise Problem("Newer workflow attempt has a stale update timestamp")
+        history.append(item)  # Append only: never overwrite an attempt's prior observations.
+        if advance:
+            signals = [entry for entry in signals if entry["workflow_run_id"] != item["workflow_run_id"]]
+            signals.append(item)
+        state["signals"], state["workflow_observations"] = signals, history
         store.save(state)
-        return item
+        return {**item, "latest_for_run": advance}
 
 
 def review(store, task_id, decision, evidence):

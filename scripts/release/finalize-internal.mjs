@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Existing internal group only. No upload, tester creation, invitation, or notification.
 import { APP, BUNDLE, VERSION, DEFAULT_CONTENT, MARKETING_URL, PRIVACY_URL,
-  protectedClient, checkPublicURLs, validateContent, Journal } from './public-beta.mjs';
-import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, fsyncSync, renameSync } from 'node:fs';
+  protectedClient, checkPublicURLs, validateContent, privateJSON, Journal } from './public-beta.mjs';
+import { writeFileSync, mkdirSync, openSync, closeSync, fsyncSync, renameSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -12,6 +12,7 @@ export const INTERNAL_GROUP = '5a93cfb4-bd7c-4c0c-acbd-ade02816d8c1';
 // the exact metadata readback required before an external review submission.
 export const INTERNAL_WHATS_NEW = DEFAULT_CONTENT.whatsNew;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PROTECTED_REVIEW = new Set(['WAITING_FOR_REVIEW', 'IN_REVIEW', 'APPROVED']);
 const attributes = row => row?.attributes ?? {};
 const stamp = () => new Date().toISOString();
 
@@ -63,6 +64,7 @@ export async function inspectInternal(api, buildID) {
     'BLOCKED_GROUP', 'The existing authorized group must be present in this app and marked internal');
   const detail = (await api(`builds/${buildID}/buildBetaDetail`)).data;
   requireThat(detail?.id, 'BLOCKED_RESPONSE', 'Build beta detail is absent');
+  const submission = (await api(`builds/${buildID}/betaAppReviewSubmission`)).data;
   const appLocales = await list(api, `apps/${APP}/betaAppLocalizations?limit=200`);
   const appEnglish = appLocales.filter(row => attributes(row).locale === 'en-US');
   requireThat(appEnglish.length === 1, 'BLOCKED_METADATA', 'Exactly one existing en-US app localization is required; none will be created');
@@ -70,7 +72,8 @@ export async function inspectInternal(api, buildID) {
     .filter(row => attributes(row).locale === 'en-US');
   requireThat(buildLocales.length <= 1, 'BLOCKED_METADATA', 'Ambiguous en-US build localization');
   const groupBuilds = await list(api, `betaGroups/${INTERNAL_GROUP}/relationships/builds?limit=200`);
-  return { app, build, version, group: matching[0], detail, appLocale: appEnglish[0], buildLocale: buildLocales[0] ?? null, groupBuilds };
+  return { app, build, version, group: matching[0], detail, submission,
+    appLocale: appEnglish[0], buildLocale: buildLocales[0] ?? null, groupBuilds };
 }
 
 export function verifyCompiledIdentity(receipt, build) {
@@ -94,6 +97,7 @@ function observed(snapshot, apply) {
     version: VERSION, apple_build_id: snapshot.build.id, build: attributes(snapshot.build).version,
     processing_state: attributes(snapshot.build).processingState, group_id: INTERNAL_GROUP, group_verified_internal: true,
     internal_build_state: attributes(snapshot.detail).internalBuildState ?? null,
+    external_review_state: attributes(snapshot.submission).betaReviewState ?? null,
     exact_build_associated: snapshot.groupBuilds.some(row => row.id === snapshot.build.id),
     uses_non_exempt_encryption: attributes(snapshot.build).usesNonExemptEncryption ?? null,
     auto_notify_enabled: attributes(snapshot.detail).autoNotifyEnabled,
@@ -111,11 +115,11 @@ export async function executeInternal({ api, buildID, apply = false, compiledIde
     report = { ...report, ...observed(snapshot, apply) };
     const compiledVerified = verifyCompiledIdentity(compiledIdentity, snapshot.build);
     report.compiled_identity_receipt_verified = compiledVerified;
-    const declaration = attributes(snapshot.build).usesNonExemptEncryption;
+    let declaration = attributes(snapshot.build).usesNonExemptEncryption;
     requireThat(declaration !== true, 'BLOCKED_ENCRYPTION_CONFLICT', 'Apple currently declares non-exempt encryption; inspect the conflict rather than overwriting it');
     requireThat(declaration === false || compiledVerified, 'BLOCKED_ENCRYPTION_EVIDENCE',
       'An unset Apple encryption declaration requires a matching compiled-app receipt with explicit usesNonExemptEncryption=false');
-    const appAttributes = desiredApp(snapshot, content);
+    let appAttributes = desiredApp(snapshot, content);
     await urlCheck();
     report.public_metadata_urls_verified = true;
     if (snapshot.buildLocale) journal?.observe(`build-locale:${buildID}:en-US`, snapshot.buildLocale.id);
@@ -123,6 +127,10 @@ export async function executeInternal({ api, buildID, apply = false, compiledIde
     const metadataMatches = value => equalFields(attributes(value.appLocale), appAttributes)
       && attributes(value.buildLocale).whatsNew === content.whatsNew
       && attributes(value.detail).autoNotifyEnabled === false && attributes(value.build).usesNonExemptEncryption === false;
+    const preserveReview = value => requireThat(
+      !PROTECTED_REVIEW.has(attributes(value.submission).betaReviewState) || metadataMatches(value),
+      'BLOCKED_REVIEW', 'External review is pending or approved; internal reconciliation may preserve identical metadata but cannot rewrite it');
+    preserveReview(snapshot);
     if (!apply) {
       report.state = 'PREFLIGHT_READY';
       report.metadata_staged = metadataMatches(snapshot);
@@ -133,6 +141,17 @@ export async function executeInternal({ api, buildID, apply = false, compiledIde
       return report;
     }
     requireThat(journal, 'BLOCKED_STATE', 'Apply requires a persistent operator journal');
+    // URL probes may take time. Re-read the review lock and exact build before
+    // any mutation, including an unrelated internal association.
+    snapshot = await inspectInternal(api, buildID);
+    const refreshedCompiled = verifyCompiledIdentity(compiledIdentity, snapshot.build);
+    declaration = attributes(snapshot.build).usesNonExemptEncryption;
+    requireThat(declaration !== true, 'BLOCKED_ENCRYPTION_CONFLICT', 'Apple currently declares non-exempt encryption; inspect the conflict rather than overwriting it');
+    requireThat(declaration === false || refreshedCompiled, 'BLOCKED_ENCRYPTION_EVIDENCE',
+      'An unset Apple encryption declaration requires matching compiled evidence');
+    appAttributes = desiredApp(snapshot, content);
+    report = { ...report, ...observed(snapshot, apply) };
+    preserveReview(snapshot);
     const patch = async (path, body) => {
       await api(path, 'PATCH', body);
       report.mutations.push({ method: 'PATCH', resource_path: path, response_observed: true });
@@ -163,6 +182,7 @@ export async function executeInternal({ api, buildID, apply = false, compiledIde
       await post(`associate:${INTERNAL_GROUP}:${buildID}`, `betaGroups/${INTERNAL_GROUP}/relationships/builds`, { data: [{ type: 'builds', id: buildID }] });
     }
     snapshot = await inspectInternal(api, buildID);
+    verifyCompiledIdentity(compiledIdentity, snapshot.build);
     report = { ...report, ...observed(snapshot, apply) };
     requireThat(metadataMatches(snapshot) && report.exact_build_associated, 'BLOCKED_READBACK', 'Expected metadata, encryption and exact internal group/build membership were not observed in readback');
     journal.observe(`build-locale:${buildID}:en-US`, snapshot.buildLocale.id);
@@ -208,12 +228,12 @@ export async function main(argv = process.argv.slice(2)) {
     requireThat(UUID.test(options.buildID ?? ''), 'BLOCKED_INPUT', 'An exact Apple build UUID is required');
     let compiledIdentity = null;
     if (options.identityPath) {
-      try { compiledIdentity = JSON.parse(readFileSync(resolve(options.identityPath), 'utf8')); }
+      try { compiledIdentity = privateJSON(options.identityPath); }
       catch { throw new Blocked('BLOCKED_INPUT', 'Compiled identity receipt could not be read'); }
     }
     const api = protectedClient();
     journal = new Journal(options.stateDir);
-    const content = options.contentPath ? JSON.parse(readFileSync(resolve(options.contentPath), 'utf8')) : DEFAULT_CONTENT;
+    const content = options.contentPath ? privateJSON(options.contentPath) : DEFAULT_CONTENT;
     const report = await executeInternal({ ...options, api, journal, compiledIdentity, content });
     atomicJSON(resolve(options.stateDir, `internal-${options.buildID}.json`), report);
     console.log(JSON.stringify(report, null, 2));

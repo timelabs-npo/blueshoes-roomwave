@@ -92,6 +92,19 @@ class SimulatorSelectionTests(unittest.TestCase):
                     code = "NO_MATCHING_DEVICE"
                 self.assert_blocked(*invoke(devices, runtimes), code)
 
+    def test_observed_device_specific_runtime_does_not_block_generic_sdk_runtime(self):
+        devices, runtimes = fixture()
+        specialized = runtime("27.2",
+            identifier="com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4",
+            buildversion="24B91016s", platform="iOS")
+        runtimes["runtimes"].insert(1, specialized)
+        devices["devices"][specialized["identifier"]] = [device(PATCH)]
+        result, receipt = invoke(devices, runtimes)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, CURRENT + "\n")
+        self.assertEqual(receipt["runtime"]["identifier"], "com.apple.CoreSimulator.SimRuntime.iOS-27-2")
+        self.assert_blocked(*invoke(devices, {"runtimes": [specialized]}), "NO_MATCHING_RUNTIME")
+
     def test_missing_matching_runtime_or_exact_model_blocks(self):
         devices, runtimes = fixture()
         self.assert_blocked(*invoke(devices, {"runtimes": runtimes["runtimes"][:1]}),

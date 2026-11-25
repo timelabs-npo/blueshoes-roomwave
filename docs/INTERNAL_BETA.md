@@ -2,7 +2,7 @@
 
 `scripts/release/finalize-internal.mjs` operates only on app `6837899703`, bundle `org.timelabs.moleculefoundry`, iOS version `0.3.0`, and the existing internal group `5a93cfb4-bd7c-4c0c-acbd-ade02816d8c1`. It requires an exact Apple build UUID, observed `VALID`/`APP_STORE_ELIGIBLE`, unexpired build, and matching app/version relationships. It verifies the group's membership in this app and its internal flag. It creates no groups or testers and calls no invitation or notification endpoint. Apple's own internal-tester delivery behavior remains a platform responsibility.
 
-The default is read-only against Apple. It does **not** read or require external Beta App Review contact information. Missing external review contact therefore cannot block the authorized internal pilot.
+The default is read-only against Apple. It does **not** read or require external Beta App Review contact information. Missing external review contact therefore cannot block the authorized internal pilot. It does read the exact build's review-submission state so internal reconciliation cannot silently alter metadata already under external review.
 
 Use Node 22+ and the same protected `APP_STORE_APP_ID`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_PRIVATE_KEY_P8_BASE64` environment as the existing release helper. The imported `protectedClient` holds the key/JWT in memory, limits requests to Apple's fixed API origin, refuses redirects and emits no secret values. No hardcoded credential path is added.
 
@@ -50,6 +50,10 @@ The sanitized final receipt is `internal-BUILD_UUID.json` in that directory. Rep
 The protected release script invokes this helper after the exact uploaded build reaches `VALID`, using its actual IPA identity receipt. It preserves the operation journal and sanitized internal receipt in the release artifact. If processing or activation remains pending, reconcile the same Apple build; do not upload again merely because the later stage is incomplete.
 
 Internal and external helpers share the same default description and `whatsNew`, including clean-landing instructions. If a reviewed custom `--content-file` is used, pass that same file to both helpers. Cross-helper regression tests run public staging, internal finalization, and public submission preflight and require the reviewed metadata to remain unchanged.
+
+If the exact build's external submission is `WAITING_FOR_REVIEW`, `IN_REVIEW` or `APPROVED`, internal finalization requires the proposed app/build metadata, disabled notification setting and encryption declaration to be identical to the observed values. Otherwise it returns `BLOCKED_REVIEW` before any mutation. Identical-content reconciliation can still associate the build with the existing internal group. The helper refreshes submission/build state after URL checks and before applying, so a review that begins during those checks also protects the metadata. It does not request contact data or submit, cancel or resubmit an external review.
+
+Public promotion has additional required source/compiled/upload/processing evidence; see [PUBLIC_BETA.md](PUBLIC_BETA.md). The internal helper's existing optional compiled-identity/encryption contract is unchanged. Both helpers use bounded reads for JSON input files.
 
 ## Evidence limits
 

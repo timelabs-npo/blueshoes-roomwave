@@ -48,9 +48,15 @@ All three inspected native runs used Xcode 27.2 with the iOS 27.0 simulator even
 
 For this next gate only, DEBUG evidence requests are deferred beyond the display-link callback, and pixel contrast is checked before PNG encoding. A bounded trace records bootstrap phases and at most one heartbeat per second. An observer refreshes the actual app/data containers, verifies the exact current evidence process before sampling, and collects at most two process samples when startup or heartbeat observations stop advancing. Staleness is evidence to inspect, not an automatic hang diagnosis. The pipeline publishes a lightweight review artifact as well as the complete native evidence. Actual gameplay assertions, render receipt requirements, release configuration, and unsigned archive gates remain required. No successful native result is recorded for this pending correction.
 
+The first selector integration, source `1954e2170312c31c9c932115bf2866562e023fe6`, failed in [45711024334](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45711024334) **before simulator launch or native compilation**. Package tests passed, but `simctl` also listed `com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4`; the selector incorrectly treated that device-specific runtime as an invalid general runtime. Artifact `15067154396` has verified ZIP SHA-256 `cf99246763076067d563aa20607258ab8961728facc7d60466e6d54c4e81dc05`. The corrected selector excludes that specialized variant without rejecting the installed general runtime. Replaying both actual inventory files now selects the available iPhone 18 Pro Max on general iOS 27.2 build `24B8117`. A regression test preserves this observed case. This offline inventory replay is not a successful native game test.
+
 ### Renewed independent Codex review
 
 Three new real Codex CLI sessions started on Wd on 26 November at 01:04 Moscow time, each from the exact published `ad02eb8` baseline, in separate worktrees with a 20-minute deadline and read-only review instructions. Their launch receipts and event logs are recorded by the coordinator; launch alone is not a completed or accepted review.
+
+All three returned source-review results. The gameplay review identified premature release guidance and misleading combo notation; the release review identified rerun allocation, source-binding, review-time metadata, final membership readback, stale workflow receipt and phone-format gaps. Focused source corrections and regressions address these findings before release. Their static review results do not replace native input or external Apple review evidence.
+
+The consolidated corrections passed 100 local continuity/release tests and 31 CI-helper tests on 26 November, including bounded subprocess cleanup, exact binary/intent consumption and the observed simulator inventory case. Shell, Python, Node and workflow YAML checks also passed. Six additional Swift tutorial behavior tests are included for the next native run; they were not executed in the Linux coordinator environment.
 
 | Review | Session |
 | --- | --- |

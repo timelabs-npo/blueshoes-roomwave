@@ -144,7 +144,7 @@ struct ArcadeRootView: View {
                         Text(session.hud.score.formatted()).font(.system(size: compact ? 28 : 40, weight: .bold))
                             .monospacedDigit().contentTransition(.identity)
                             .accessibilityLabel("Score \(session.hud.score)")
-                        Text("×\(session.hud.combo) FLOW").font(.caption.weight(.bold)).foregroundStyle(teal)
+                        Text("COMBO \(session.hud.combo)").font(.caption.weight(.bold)).foregroundStyle(teal)
                             .accessibilityLabel("Combo \(session.hud.combo)")
                     }
                     Spacer()
@@ -200,6 +200,11 @@ struct ArcadeRootView: View {
                     secondary("Home", symbol: "house") { session.home() }
                         .accessibilityIdentifier("arcade.home")
                 }
+                if !session.preferences.tutorialSeen {
+                    Button("Hide control tips") { session.dismissTutorial() }
+                        .font(.footnote).frame(minHeight: 44)
+                        .accessibilityIdentifier("arcade.dismiss-tutorial")
+                }
             }.padding(28).frame(maxWidth: 440)
         }
     }
@@ -238,11 +243,16 @@ struct ArcadeRootView: View {
                     }.foregroundStyle(gold).accessibilityLabel("\(result.medal.rawValue) medal")
                 }
             }
+            if let explanation = session.resultExplanation {
+                Text(explanation).font(.caption).foregroundStyle(.white.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("arcade.result-cause")
+            }
             Text(bestComparison(result.score)).font(.caption.weight(.semibold)).foregroundStyle(gold)
             HStack(spacing: compact ? 18 : 28) {
                 statistic("RINGS", value: "\(result.rings)")
                 statistic("PERFECT", value: "\(result.perfectLandings)")
-                statistic("COMBO", value: "×\(result.bestCombo)")
+                statistic("BEST COMBO", value: "\(result.bestCombo)")
             }
         }
     }

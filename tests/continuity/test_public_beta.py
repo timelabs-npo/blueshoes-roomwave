@@ -13,6 +13,19 @@ import { readFileSync } from 'node:fs';
 const input = JSON.parse(readFileSync(0, 'utf8'));
 const buildID = '11111111-2222-3333-4444-555555555555';
 const contact = { firstName: 'PRIVATE_FIRST_SENTINEL', lastName: 'PRIVATE_LAST_SENTINEL', email: 'private-contact@example.invalid', phone: '+12025550123' };
+if(Object.hasOwn(input,'phone')) contact.phone=input.phone;
+const sourceSHA='a'.repeat(40);
+const evidence={sourceSHA,
+ compiledIdentity:{bundle:BUNDLE,version:VERSION,build:'1003.1',identity_verified:true,usesNonExemptEncryption:false},
+ releaseReceipt:{commit:sourceSHA,app_store_app_id:APP,bundle_identifier:BUNDLE,version:VERSION,build:'1003.1',signature_verified:true,upload_accepted:true,ipa_sha256:'b'.repeat(64)},
+ processingReceipt:{app_id:APP,version:VERSION,build:'1003.1',apple_build_id:buildID,apple_processing:'VALID'},
+};
+if(input.missingEvidence) delete evidence[input.missingEvidence];
+for(const change of input.receiptChanges||[]) {
+ if(change.receipt==='sourceSHA') evidence.sourceSHA=change.value;
+ else if(change.remove) delete evidence[change.receipt][change.key];
+ else evidence[change.receipt][change.key]=change.value;
+}
 const state = {
  app: { type:'apps', id:APP, attributes:{ bundleId:BUNDLE } },
  build: { type:'builds', id:buildID, attributes:{version:'1003.1',processingState:'VALID',buildAudienceType:'APP_STORE_ELIGIBLE',expired:false,expirationDate:'2099-01-01T00:00:00Z'} },
@@ -45,7 +58,15 @@ async function api(path, method='GET', body) {
    const row=[state.detail,state.review,...state.appLocales,...state.buildLocales,...state.groups].find(row=>row.id===body.data.id);
    if(!row) throw new Error('Unknown fixture patch');
    Object.assign(row.attributes,body.data.attributes);
-   if(body.data.type==='betaGroups' && body.data.attributes.publicLinkEnabled) row.attributes.publicLink='https://testflight.apple.com/join/Observed123';
+   if(body.data.type==='betaGroups' && body.data.attributes.publicLinkEnabled) {
+     row.attributes.publicLink='https://testflight.apple.com/join/Observed123';
+     if(input.readbackDrift==='membership') state.groupBuilds=[];
+     if(input.readbackDrift==='description') state.appLocales[0].attributes.description='Changed after enabling';
+     if(input.readbackDrift==='whatsNew') state.buildLocales[0].attributes.whatsNew='Changed after enabling';
+     if(input.readbackDrift==='reviewNotes') state.review.attributes.notes='Changed after enabling';
+     if(input.readbackDrift==='notification') state.detail.attributes.autoNotifyEnabled=true;
+     if(input.readbackDrift==='build') state.build.attributes.version='1003.9';
+   }
    return clone(row);
  }
  if(method==='POST' && path==='betaGroups') {
@@ -69,6 +90,7 @@ async function api(path, method='GET', body) {
 }
 if(input.scenario==='wrong-bundle') state.app.attributes.bundleId='different.bundle';
 if(input.scenario==='wrong-version') state.version.attributes.version='0.2.0';
+if(input.scenario==='wrong-build-number') state.build.attributes.version='1003.2';
 if(input.scenario==='internal-only') state.build.attributes.buildAudienceType='INTERNAL_ONLY';
 if(input.scenario==='expired') state.build.attributes.expired=true;
 if(input.scenario==='extra-locale') state.appLocales.push({id:'fr',attributes:{locale:'fr-FR',description:'Old chemistry'}});
@@ -77,7 +99,7 @@ if(input.scenario==='other-build') {
  state.groupBuilds=[{type:'builds',id:'different-build'}];
 }
 const journal=new Journal(input.directory);
-const base={api,journal,buildID,contact:input.scenario==='missing-contact'?null:contact,urlCheck:async()=>true};
+const base={api,journal,buildID,...evidence,contact:input.scenario==='missing-contact'?null:contact,urlCheck:async()=>true};
 const results=[];
 try {
  if(input.scenario==='url-failure') base.urlCheck=()=>checkPublicURLs(async()=>({status:404,body:{cancel:async()=>{}}}));
@@ -120,17 +142,108 @@ class PublicBetaTests(unittest.TestCase):
             self.assertEqual(self.writes(result), [])
 
     def test_identity_and_eligibility_block_before_mutation(self):
-        for scenario in ("wrong-bundle", "wrong-version", "internal-only", "expired", "other-build", "extra-locale"):
+        for scenario in ("wrong-bundle", "wrong-version", "wrong-build-number", "internal-only", "expired", "other-build", "extra-locale"):
             with self.subTest(scenario=scenario):
                 result = self.scenario(scenario, action="stage", apply=True)
                 self.assertTrue(result["results"][-1]["state"].startswith("BLOCKED_"))
                 self.assertEqual(self.writes(result), [])
+
+    def test_all_promotion_actions_require_reviewed_source_and_all_three_receipts(self):
+        for action in ("preflight", "stage", "submit", "enable-public-link"):
+            for field in ("sourceSHA", "compiledIdentity", "releaseReceipt", "processingReceipt"):
+                with self.subTest(action=action, missing=field):
+                    result = self.scenario(action=action, apply=action != "preflight", missingEvidence=field)
+                    self.assertEqual(result["results"][-1]["state"], "BLOCKED_PROMOTION_EVIDENCE")
+                    self.assertEqual(result["calls"], [])
+
+    def test_receipt_chain_rejects_wrong_source_identity_or_unaccepted_upload(self):
+        cases = (
+            ("sourceSHA", None, "a" * 39),
+            ("sourceSHA", None, "c" * 40),
+            ("releaseReceipt", "commit", "c" * 40),
+            ("releaseReceipt", "app_store_app_id", "different-app"),
+            ("releaseReceipt", "bundle_identifier", "different.bundle"),
+            ("releaseReceipt", "version", "0.2.0"),
+            ("releaseReceipt", "build", "1003.2"),
+            ("releaseReceipt", "signature_verified", False),
+            ("releaseReceipt", "upload_accepted", False),
+            ("releaseReceipt", "ipa_sha256", "invalid-digest"),
+            ("compiledIdentity", "build", "1003.2"),
+            ("compiledIdentity", "identity_verified", False),
+            ("compiledIdentity", "usesNonExemptEncryption", None),
+            ("compiledIdentity", "apple_build_id", "99999999-2222-3333-4444-555555555555"),
+            ("processingReceipt", "app_id", "different-app"),
+            ("processingReceipt", "version", "0.2.0"),
+            ("processingReceipt", "build", "1003.2"),
+            ("processingReceipt", "apple_build_id", "99999999-2222-3333-4444-555555555555"),
+            ("processingReceipt", "apple_processing", "PROCESSING"),
+            ("processingReceipt", "source_sha", "c" * 40),
+        )
+        for receipt, key, value in cases:
+            with self.subTest(receipt=receipt, key=key):
+                result = self.scenario(action="stage", apply=True,
+                                       receiptChanges=[{"receipt": receipt, "key": key, "value": value}])
+                self.assertEqual(result["results"][-1]["state"], "BLOCKED_PROMOTION_EVIDENCE")
+                self.assertEqual(result["calls"], [])
+
+    def test_verified_receipt_identity_is_preserved_in_promotion_report(self):
+        report = self.scenario("approved")["results"][-1]
+        self.assertEqual(report["source_sha"], "a" * 40)
+        self.assertEqual(report["ipa_sha256"], "b" * 64)
+        self.assertTrue(report["promotion_evidence_verified"])
+        self.assertEqual(report["build"], "1003.1")
+
+    def test_cli_reads_required_receipts_before_protected_client_initialization(self):
+        build_id = "11111111-2222-3333-4444-555555555555"
+        source = "a" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            receipts = {
+                "compiled-identity-receipt": {"bundle": "org.timelabs.moleculefoundry", "version": "0.3.0",
+                    "build": "1003.1", "identity_verified": True, "usesNonExemptEncryption": False},
+                "release-receipt": {"commit": source, "app_store_app_id": "6837899703",
+                    "bundle_identifier": "org.timelabs.moleculefoundry", "version": "0.3.0", "build": "1003.1",
+                    "signature_verified": True, "upload_accepted": True, "ipa_sha256": "b" * 64},
+                "processing-receipt": {"app_id": "6837899703", "version": "0.3.0", "build": "1003.1",
+                    "apple_build_id": build_id, "apple_processing": "VALID"},
+            }
+            receipt_args = []
+            for name, value in receipts.items():
+                path = folder / f"{name}.json"
+                path.write_text(json.dumps(value), encoding="utf-8")
+                receipt_args.extend([f"--{name}", str(path)])
+            command = [shutil.which("node"), str(HELPER), "preflight", "--build-id", build_id,
+                       "--state-dir", str(folder / "operator")]
+            cases = (
+                ([], "BLOCKED_PROMOTION_EVIDENCE"),
+                (receipt_args, "BLOCKED_PROMOTION_EVIDENCE"),
+                (receipt_args + ["--source-sha", "c" * 40], "BLOCKED_PROMOTION_EVIDENCE"),
+                (receipt_args + ["--source-sha", source], "BLOCKED_IDENTITY"),
+            )
+            for arguments, state in cases:
+                with self.subTest(state=state, arguments=len(arguments)):
+                    # Empty environment deliberately prevents any real Apple key,
+                    # protected identity or network operation from being reached.
+                    result = subprocess.run(command + arguments, env={}, text=True,
+                                            capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertEqual(json.loads(result.stdout)["state"], state)
+            self.assertFalse((folder / "operator").exists())
 
     def test_contact_and_public_privacy_url_are_real_preconditions(self):
         for scenario, code in (("missing-contact", "BLOCKED_INPUT"), ("url-failure", "BLOCKED_METADATA")):
             result = self.scenario(scenario, action="stage", apply=True)
             self.assertEqual(result["results"][-1]["state"], code)
             self.assertEqual(self.writes(result), [])
+
+    def test_international_phone_requires_real_digit_structure_after_normalization(self):
+        for phone in ("+1------", "+1234567", "+1234567890123456", "+01234567890", "++12025550123", "+1-ABC-555-0123"):
+            with self.subTest(phone=phone):
+                result = self.scenario(action="stage", apply=True, phone=phone)
+                self.assertEqual(result["results"][-1]["state"], "BLOCKED_INPUT")
+                self.assertEqual(self.writes(result), [])
+        formatted = self.scenario(action="stage", apply=True, phone="+1 (202) 555-0123")
+        self.assertEqual(formatted["results"][-1]["state"], "STAGED_PRIVATE")
 
     def test_stage_correct_whatsnew_and_disabled_capped_external_group(self):
         result = self.scenario(action="stage", apply=True)
@@ -182,6 +295,17 @@ class PublicBetaTests(unittest.TestCase):
         self.assertEqual(report["public_url"], "https://testflight.apple.com/join/Observed123")
         self.assertFalse(report["external_testing_active"])
         self.assertFalse(report["tester_access_verified"])
+
+    def test_public_link_final_readback_rechecks_full_staging_and_receipt_binding(self):
+        for drift in ("membership", "description", "whatsNew", "reviewNotes", "notification", "build"):
+            with self.subTest(drift=drift):
+                result = self.scenario("approved", readbackDrift=drift)
+                report = result["results"][-1]
+                expected = "BLOCKED_PROMOTION_EVIDENCE" if drift == "build" else "BLOCKED_READBACK"
+                self.assertEqual(report["state"], expected)
+                self.assertNotIn("public_url", report)
+                self.assertTrue(result["state"]["groups"][-1]["attributes"]["publicLinkEnabled"])
+                self.assertTrue(report["mutations"], "The observed PATCH must survive a failed final gate")
 
     def test_rejected_submission_is_never_automatically_resubmitted(self):
         result = self.scenario("rejected")

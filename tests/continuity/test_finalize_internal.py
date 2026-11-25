@@ -9,7 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS = r'''
 import { executeInternal, INTERNAL_GROUP } from INTERNAL_URL;
-import { Journal, APP, BUNDLE, VERSION, checkPublicURLs } from PUBLIC_URL;
+import { Journal, APP, BUNDLE, VERSION, DEFAULT_CONTENT, MARKETING_URL, PRIVACY_URL, checkPublicURLs } from PUBLIC_URL;
 import { readFileSync } from 'node:fs';
 const input = JSON.parse(readFileSync(0,'utf8'));
 const buildID='11111111-2222-3333-4444-555555555555';
@@ -20,7 +20,7 @@ const state={
  detail:{id:'detail-id',attributes:{autoNotifyEnabled:true,internalBuildState:'READY_FOR_BETA_TESTING'}},
  groups:[{id:INTERNAL_GROUP,attributes:{name:'Existing internal group',isInternalGroup:true,hasAccessToAllBuilds:false}}],
  appLocales:[{id:'app-locale',attributes:{locale:'en-US',description:'Old chemistry app',feedbackEmail:'private-feedback@example.invalid'}}],
- buildLocales:[], groupBuilds:[{type:'builds',id:'older-build'}],
+ buildLocales:[], groupBuilds:[{type:'builds',id:'older-build'}], submission:null,
 };
 const calls=[];
 const clone=data=>({data:structuredClone(data)});
@@ -33,6 +33,7 @@ async function api(path,method='GET',body) {
   if(path.endsWith('/preReleaseVersion')) return clone(state.version);
   if(path.includes('/betaGroups?')) return clone(state.groups);
   if(path.endsWith('/buildBetaDetail')) return clone(state.detail);
+  if(path.endsWith('/betaAppReviewSubmission')) return clone(state.submission);
   if(path.includes('/betaAppLocalizations?')) return clone(state.appLocales);
   if(path.includes('/betaBuildLocalizations?')) return clone(state.buildLocales);
   if(path.includes('/relationships/builds?')) return clone(state.groupBuilds);
@@ -60,6 +61,15 @@ if(input.scenario==='wrong-bundle') state.app.attributes.bundleId='different.bun
 if(input.scenario==='invalid-build') state.build.attributes.processingState='PROCESSING';
 if(input.scenario==='internal-only') state.build.attributes.buildAudienceType='INTERNAL_ONLY';
 if(input.scenario==='expired') state.build.attributes.expired=true;
+if(input.reviewState) state.submission={id:'submission-id',attributes:{betaReviewState:input.reviewState}};
+if(input.metadataPrepared) {
+ Object.assign(state.appLocales[0].attributes,{description:DEFAULT_CONTENT.description,marketingUrl:MARKETING_URL,privacyPolicyUrl:PRIVACY_URL});
+ state.buildLocales=[{id:'build-locale',attributes:{locale:'en-US',whatsNew:DEFAULT_CONTENT.whatsNew}}];
+ state.detail.attributes.autoNotifyEnabled=false;
+}
+if(input.metadataDrift==='description') state.appLocales[0].attributes.description='Different reviewed description';
+if(input.metadataDrift==='whatsNew') state.buildLocales[0].attributes.whatsNew='Different reviewed test instructions';
+if(input.metadataDrift==='missing-locale') state.buildLocales=[];
 if(input.scenario.startsWith('encryption-')) state.build.attributes.usesNonExemptEncryption=null;
 if(input.scenario==='encryption-conflict') state.build.attributes.usesNonExemptEncryption=true;
 let receipt=null;
@@ -71,6 +81,7 @@ if(['encryption-good','encryption-wrong-build','encryption-missing-field','encry
 const journal=new Journal(input.directory);
 const options={api,journal,buildID,apply:!!input.apply,compiledIdentity:receipt,urlCheck:async()=>true};
 if(input.scenario==='url-failure')options.urlCheck=()=>checkPublicURLs(async()=>({status:404,body:{cancel:async()=>{}}}));
+if(input.reviewDuringURLs) options.urlCheck=async()=>{state.submission={id:'submission-id',attributes:{betaReviewState:'IN_REVIEW'}};return true;};
 const reports=[];
 try {
  reports.push(await executeInternal(options));
@@ -82,10 +93,10 @@ try {
 
 @unittest.skipUnless(shutil.which("node"), "Node required")
 class InternalFinalizationTests(unittest.TestCase):
-    def scenario(self, scenario="default", apply=False):
+    def scenario(self, scenario="default", apply=False, **options):
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(["node", "--input-type=module", "-e", HARNESS],
-                                    input=json.dumps({"scenario": scenario, "apply": apply, "directory": directory}),
+                                    input=json.dumps({"scenario": scenario, "apply": apply, "directory": directory, **options}),
                                     text=True, capture_output=True, timeout=15)
             self.assertEqual(result.returncode, 0, result.stderr)
             return json.loads(result.stdout)
@@ -98,7 +109,32 @@ class InternalFinalizationTests(unittest.TestCase):
         self.assertEqual(result["reports"][-1]["state"], "PREFLIGHT_READY")
         self.assertFalse(result["reports"][-1]["external_review_contact_required"])
         self.assertEqual(self.writes(result), [])
-        self.assertFalse(any("betaAppReview" in call["path"] for call in result["calls"]))
+        self.assertFalse(any("betaAppReviewDetail" in call["path"] for call in result["calls"]))
+        self.assertTrue(any("betaAppReviewSubmission" in call["path"] for call in result["calls"]))
+
+    def test_pending_or_approved_review_blocks_metadata_rewrites_before_any_mutation(self):
+        for review in ("WAITING_FOR_REVIEW", "IN_REVIEW", "APPROVED"):
+            for drift in ("description", "whatsNew", "missing-locale"):
+                with self.subTest(review=review, drift=drift):
+                    result = self.scenario(apply=True, reviewState=review,
+                                           metadataPrepared=True, metadataDrift=drift)
+                    self.assertEqual(result["reports"][-1]["state"], "BLOCKED_REVIEW")
+                    self.assertEqual(self.writes(result), [])
+
+    def test_identical_reviewed_metadata_allows_only_internal_association(self):
+        for review in ("WAITING_FOR_REVIEW", "IN_REVIEW", "APPROVED"):
+            with self.subTest(review=review):
+                result = self.scenario(apply=True, reviewState=review, metadataPrepared=True)
+                self.assertEqual(result["reports"][-1]["state"], "INTERNAL_BETA_AVAILABLE")
+                self.assertEqual(result["reports"][-1]["external_review_state"], review)
+                self.assertEqual([(call["method"], call["path"]) for call in self.writes(result)],
+                                 [("POST", "betaGroups/5a93cfb4-bd7c-4c0c-acbd-ade02816d8c1/relationships/builds")])
+
+    def test_review_starting_during_url_checks_is_rechecked_before_mutation(self):
+        result = self.scenario(apply=True, reviewDuringURLs=True)
+        self.assertEqual(result["reports"][-1]["state"], "BLOCKED_REVIEW")
+        self.assertEqual(result["reports"][-1]["external_review_state"], "IN_REVIEW")
+        self.assertEqual(self.writes(result), [])
 
     def test_exact_app_build_version_and_internal_group_guards(self):
         for scenario in ("wrong-group", "missing-group", "wrong-version", "wrong-bundle", "invalid-build", "internal-only", "expired"):
@@ -168,8 +204,9 @@ class InternalFinalizationTests(unittest.TestCase):
     def test_no_email_output_upload_group_creation_or_invitation(self):
         result = self.scenario(apply=True)
         self.assertNotIn("private-feedback@example.invalid", json.dumps(result["reports"]))
-        forbidden = ('upload', 'notification', 'betatesters', 'betaappreview')
+        forbidden = ('upload', 'notification', 'betatesters', 'betaappreviewdetail')
         self.assertFalse(any(any(word in call["path"].lower() for word in forbidden) for call in result["calls"]))
+        self.assertFalse(any('betaappreview' in call['path'].lower() for call in self.writes(result)))
         self.assertFalse(any(call["method"] == 'POST' and call["path"] == 'betaGroups' for call in result["calls"]))
 
 

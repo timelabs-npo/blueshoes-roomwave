@@ -16,7 +16,7 @@ final class ArcadeSession: ObservableObject {
     @Published private(set) var preferences = ArcadePreferences()
     @Published private(set) var result: SurfRunResult?
     @Published private(set) var previousBest: Int?
-    @Published private(set) var tutorialStage = 0
+    @Published private(set) var tutorialCue: SurfTutorialCue? = .charge
     @Published private(set) var selectedBest: ArcadeBest?
 
     private let rules = SurfRules.standard
@@ -31,7 +31,6 @@ final class ArcadeSession: ObservableObject {
     private var profileLoaded = false
     private var held = false
     private var cancelInputOnNextTick = false
-    private var dove = false
     private var isActive = true
     private var systemReducedMotion = false
     private var displayLink: CADisplayLink?
@@ -52,11 +51,25 @@ final class ArcadeSession: ObservableObject {
     var subtitle: String { course?.definition.subtitle ?? "Find your flow above the current." }
     var tutorial: String? {
         guard !preferences.tutorialSeen else { return nil }
-        switch tutorialStage {
-        case 0: return "HOLD TO CHARGE"
-        case 1: return "RELEASE TO SOAR"
-        default: return "HOLD TO DIVE · RELEASE BEFORE LANDING"
+        switch tutorialCue {
+        case .some(.charge): return "HOLD TO CHARGE"
+        case .some(.release): return "RELEASE TO SOAR"
+        case .some(.dive): return "HOLD TO DIVE · RELEASE BEFORE LANDING"
+        case .some(.releaseBeforeLanding): return "RELEASE BEFORE LANDING"
+        case nil: return nil
         }
+    }
+
+    var resultExplanation: String? {
+        guard result != nil, let state, state.phase == .crashed else { return nil }
+        if state.shields == 0 {
+            let finalHit = frameEvents.contains {
+                $0.kind == .hit && $0.tick == state.tick && $0.value == 0
+            }
+            return finalHit ? "An obstacle hit used your last shield." : "No shields remaining."
+        }
+        if state.tick >= rules.maximumTicks { return "The run time limit was reached." }
+        return "This run ended."
     }
 
     func bootstrap() async {
@@ -196,11 +209,11 @@ final class ArcadeSession: ObservableObject {
 
     func play() {
         guard !isLoading, errorMessage == nil, isActive, let course else { return }
-        held = false; dove = false; cancelInputOnNextTick = false
+        held = false; cancelInputOnNextTick = false
         accumulator = 0; lastHUDTime = 0; callout = ""; calloutUntil = 0
         inputs.removeAll(keepingCapacity: true)
         state = SurfSimulation.start(course: course, rules: rules)
-        result = nil; previousBest = nil; tutorialStage = 0
+        result = nil; previousBest = nil; tutorialCue = .charge
         screen = .playing
         publishHUD(now: CACurrentMediaTime())
         audio.configure(preferences, running: true)
@@ -210,17 +223,19 @@ final class ArcadeSession: ObservableObject {
     func setPressed(_ pressed: Bool) {
         guard screen == .playing, isActive else { held = false; return }
         held = pressed
-        if pressed, state?.grounded == false { dove = true }
+        updateTutorialCue()
     }
 
     func cancelTouch() {
         held = false
         if screen == .playing { cancelInputOnNextTick = true }
+        updateTutorialCue()
     }
 
     func pause() {
         if screen == .playing { cancelInputOnNextTick = true }
         held = false
+        updateTutorialCue()
         stopClock(); audio.stop()
         if screen == .playing { screen = .paused }
         observeEvidence()
@@ -230,6 +245,7 @@ final class ArcadeSession: ObservableObject {
         guard screen == .paused, isActive, errorMessage == nil else { return }
         held = false
         screen = .playing
+        updateTutorialCue()
         audio.configure(preferences, running: true)
         startClock(preview: false)
     }
@@ -260,6 +276,8 @@ final class ArcadeSession: ObservableObject {
     }
 
     func dismissNotice() { statusMessage = nil }
+
+    func dismissTutorial() { markTutorialSeen() }
 
     func retryLoad() {
         guard !isLoading else { return }
@@ -330,19 +348,15 @@ final class ArcadeSession: ObservableObject {
                 for event in step.events {
                     frameEvents.append(event)
                     audio.play(event)
-                    if event.kind == .takeoff { tutorialStage = 2 }
-                    if event.kind == .landing || event.kind == .perfectLanding,
-                       dove, !preferences.tutorialSeen {
-                        preferences.tutorialSeen = true
-                        profile.update(preferences: preferences)
-                    }
+                    if event.kind == .takeoff || event.kind == .landing { significant = true }
                     if let message = Self.callout(for: event) {
                         callout = message; calloutUntil = now + 1.1; calloutID += 1
                         significant = true
                     }
                 }
-                if !preferences.tutorialSeen, tutorialStage == 0, current.grounded, current.charge > 0.12 {
-                    tutorialStage = 1
+                if !preferences.tutorialSeen,
+                   SurfTutorialGuidance.observedCleanLanding(in: step.events) {
+                    markTutorialSeen()
                 }
             }
             state = current
@@ -392,6 +406,7 @@ final class ArcadeSession: ObservableObject {
 
     private func publishHUD(now: Double) {
         guard let state else { return }
+        updateTutorialCue()
         var next = ArcadeHUD()
         next.score = state.score; next.combo = state.combo; next.shields = state.shields
         next.speed = Int(state.speed.rounded())
@@ -401,6 +416,19 @@ final class ArcadeSession: ObservableObject {
         next.calloutID = calloutID
         if next != hud { hud = next }
         lastHUDTime = now
+    }
+
+    private func updateTutorialCue() {
+        guard !preferences.tutorialSeen, let state, let course else { return }
+        let next = SurfTutorialGuidance.cue(state: state, pressed: held,
+            cancellationPending: cancelInputOnNextTick, course: course, rules: rules)
+        if next != tutorialCue { tutorialCue = next }
+    }
+
+    private func markTutorialSeen() {
+        guard !preferences.tutorialSeen else { return }
+        preferences.tutorialSeen = true
+        profile.update(preferences: preferences)
     }
 
     private func fail(_ message: String) {

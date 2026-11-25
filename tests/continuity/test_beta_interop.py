@@ -21,6 +21,13 @@ import { readFileSync } from 'node:fs';
 globalThis.fetch = async () => { throw new Error('Network is forbidden in this fixture'); };
 const input = JSON.parse(readFileSync(0, 'utf8'));
 const buildID = '11111111-2222-3333-4444-555555555555';
+const sourceSHA = 'a'.repeat(40);
+const evidence = { sourceSHA,
+  compiledIdentity: { bundle: BUNDLE, version: VERSION, build: '1003.1', identity_verified: true, usesNonExemptEncryption: false },
+  releaseReceipt: { commit: sourceSHA, app_store_app_id: APP, bundle_identifier: BUNDLE, version: VERSION,
+    build: '1003.1', signature_verified: true, upload_accepted: true, ipa_sha256: 'b'.repeat(64) },
+  processingReceipt: { app_id: APP, version: VERSION, build: '1003.1', apple_build_id: buildID, apple_processing: 'VALID' },
+};
 const publicGroupID = 'public-group';
 const contact = {
   firstName: 'Fixture', lastName: 'Reviewer',
@@ -140,12 +147,15 @@ async function withJournal(name, operation) {
   finally { journal.close(); }
 }
 
-const base = { api, buildID, urlCheck: async () => true, ...contentOptions };
+const base = { api, buildID, ...evidence, urlCheck: async () => true, ...contentOptions };
 const staged = await withJournal('public-stage', journal =>
   execute({ ...base, journal, contact, action: 'stage', apply: true }));
 const afterStage = metadata();
+if (input.reviewState) state.submission = { id: 'submission-id', attributes: { betaReviewState: input.reviewState } };
+const internalContent = input.internalMismatch ? { content: { ...expectedContent,
+  whatsNew: 'Different internal metadata must not replace the externally reviewed test instructions.' } } : {};
 const finalized = await withJournal('internal-finalize', journal =>
-  executeInternal({ ...base, journal, apply: true }));
+  executeInternal({ ...base, ...internalContent, journal, apply: true }));
 const afterInternal = metadata();
 const preflight = await withJournal('public-submit-preflight', journal =>
   execute({ ...base, journal, action: 'submit', apply: false }));
@@ -168,11 +178,11 @@ console.log(JSON.stringify({
 
 @unittest.skipUnless(shutil.which('node'), 'Node is required for helper integration tests')
 class BetaHelperInteroperationTests(unittest.TestCase):
-    def scenario(self, *, custom):
+    def scenario(self, *, custom, **options):
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(
                 ['node', '--input-type=module', '-e', HARNESS],
-                input=json.dumps({'custom': custom, 'directory': directory}),
+                input=json.dumps({'custom': custom, 'directory': directory, **options}),
                 text=True, capture_output=True, timeout=15,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -230,6 +240,26 @@ class BetaHelperInteroperationTests(unittest.TestCase):
         result = self.scenario(custom=True)
         self.assertIn('Reviewed custom test plan', result['expectedContent']['whatsNew'])
         self.assert_interoperates(result)
+
+    def test_review_in_progress_or_approved_survives_identical_internal_reconciliation(self):
+        for review in ('IN_REVIEW', 'APPROVED'):
+            with self.subTest(review=review):
+                result = self.scenario(custom=True, reviewState=review)
+                self.assertEqual([report['state'] for report in result['reports']],
+                                 ['STAGED_PRIVATE', 'INTERNAL_BETA_AVAILABLE', 'PREFLIGHT_READY'])
+                self.assertEqual(result['metadata'], [result['expectedContent']] * 3)
+                internal_writes = [call for call in result['calls']
+                                   if call['phase'] == 'internal-finalize' and call['method'] != 'GET']
+                self.assertEqual([call['path'] for call in internal_writes],
+                                 [f"betaGroups/{result['internalGroupID']}/relationships/builds"])
+
+    def test_different_internal_content_cannot_invalidate_public_review_metadata(self):
+        result = self.scenario(custom=True, reviewState='IN_REVIEW', internalMismatch=True)
+        self.assertEqual([report['state'] for report in result['reports']],
+                         ['STAGED_PRIVATE', 'BLOCKED_REVIEW', 'PREFLIGHT_READY'])
+        self.assertEqual(result['metadata'], [result['expectedContent']] * 3)
+        self.assertFalse(any(call['phase'] == 'internal-finalize' and call['method'] != 'GET'
+                             for call in result['calls']))
 
 
 if __name__ == '__main__':

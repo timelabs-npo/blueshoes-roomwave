@@ -309,5 +309,166 @@ result.write_text("Worker claim only; independent review still required.")
             s.record_workflow(self.store, record)
 
 
+class WorkflowObservationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = s.Store(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def receipt(self, attempt=1, status="completed", conclusion="success", updated=20, observed=None, **extra):
+        def timestamp(second):
+            return f"2026-11-25T20:00:{second:02d}Z"
+        record = {"schema_version": 2, "origin": "github_actions", "source_sha": "a" * 40,
+                  "workflow_run_id": 123, "run_attempt": attempt, "workflow_name": "Native readiness",
+                  "run_status": status, "conclusion": conclusion, "run_updated_at": timestamp(updated),
+                  "attempt_evidence": "workflow_run_payload", "observed_at": timestamp(observed or updated),
+                  "trigger": "workflow_run", "evidence_url": f"https://example.invalid/runs/123/attempts/{attempt}"}
+        record.update(extra)
+        return record
+
+    def legacy(self, conclusion="success", observed=30):
+        record = self.receipt(conclusion=conclusion, observed=observed)
+        record["schema_version"] = 1
+        for key in ("run_attempt", "run_status", "run_updated_at", "attempt_evidence"):
+            record.pop(key)
+        return record
+
+    def assert_rejected_unchanged(self, record, reason):
+        before = self.store.path.read_bytes()
+        with self.assertRaisesRegex(s.Problem, reason):
+            s.record_workflow(self.store, record)
+        self.assertEqual(self.store.path.read_bytes(), before)
+
+    def test_rerun_keeps_immutable_observations_and_latest_attempt(self):
+        queued = self.receipt(status="queued", conclusion=None, updated=10)
+        s.record_workflow(self.store, queued)
+        first = self.store.read()["workflow_observations"][0]
+        s.record_workflow(self.store, self.receipt(conclusion="failure", updated=20))
+        s.record_workflow(self.store, self.receipt(attempt=2, status="in_progress", conclusion=None, updated=30))
+        s.record_workflow(self.store, self.receipt(attempt=2, updated=40))
+        state = self.store.read()
+        self.assertEqual(state["workflow_observations"][0], first)
+        self.assertEqual([item["run_attempt"] for item in state["workflow_observations"]], [1, 1, 2, 2])
+        self.assertEqual(len(state["signals"]), 1)
+        self.assertEqual(state["signals"][0]["run_attempt"], 2)
+        self.assertEqual(state["signals"][0]["conclusion"], "success")
+        self.assertEqual(state["tasks"], {})
+        self.assertEqual(state["releases"], {})
+
+    def test_delayed_prior_attempt_is_history_not_current_even_with_later_observed_at(self):
+        s.record_workflow(self.store, self.receipt(attempt=2, updated=40))
+        result = s.record_workflow(self.store, self.receipt(conclusion="failure", updated=20, observed=50))
+        self.assertFalse(result["latest_for_run"])
+        state = self.store.read()
+        self.assertEqual(state["signals"][0]["run_attempt"], 2)
+        self.assertEqual(state["signals"][0]["conclusion"], "success")
+        self.assertEqual(len(state["workflow_observations"]), 2)
+
+    def test_older_api_update_rejected_despite_new_receipt_time(self):
+        s.record_workflow(self.store, self.receipt(status="in_progress", conclusion=None, updated=30))
+        self.assert_rejected_unchanged(
+            self.receipt(status="in_progress", conclusion=None, updated=20, observed=50), "Stale workflow update")
+
+    def test_higher_attempt_cannot_supply_an_older_api_update(self):
+        s.record_workflow(self.store, self.receipt(updated=30))
+        self.assert_rejected_unchanged(
+            self.receipt(attempt=2, status="queued", conclusion=None, updated=20, observed=50),
+            "Newer workflow attempt has a stale")
+
+    def test_terminal_conclusion_cannot_change_or_reopen_same_attempt(self):
+        s.record_workflow(self.store, self.receipt(updated=20))
+        for update in (self.receipt(conclusion="failure", updated=30),
+                       self.receipt(status="in_progress", conclusion=None, updated=30)):
+            self.assert_rejected_unchanged(update, "terminal conclusion is immutable")
+
+    def test_nonterminal_status_cannot_regress(self):
+        s.record_workflow(self.store, self.receipt(status="in_progress", conclusion=None, updated=20))
+        self.assert_rejected_unchanged(self.receipt(status="queued", conclusion=None, updated=30), "cannot regress")
+
+    def test_equal_timestamp_allows_progress_but_not_conflicting_peer_status(self):
+        s.record_workflow(self.store, self.receipt(status="queued", conclusion=None, updated=20))
+        self.assert_rejected_unchanged(self.receipt(status="waiting", conclusion=None, updated=20), "Conflicting")
+        s.record_workflow(self.store, self.receipt(status="in_progress", conclusion=None, updated=20))
+        s.record_workflow(self.store, self.receipt(updated=20))
+        self.assertEqual(self.store.read()["signals"][0]["conclusion"], "success")
+
+    def test_newer_api_state_wins_over_observer_clock_order(self):
+        s.record_workflow(self.store, self.receipt(status="queued", conclusion=None, updated=10, observed=30))
+        s.record_workflow(self.store, self.receipt(updated=20, observed=25))
+        self.assertEqual(self.store.read()["signals"][0]["conclusion"], "success")
+
+    def test_duplicate_receipt_is_idempotent_without_revision_or_history_growth(self):
+        record = self.receipt()
+        s.record_workflow(self.store, record)
+        before = self.store.path.read_bytes()
+        self.assertTrue(s.record_workflow(self.store, record)["latest_for_run"])
+        self.assertEqual(self.store.path.read_bytes(), before)
+
+    def test_revision_23_legacy_state_migrates_only_on_explicit_import(self):
+        legacy = self.legacy()
+        saved = {"schema_version": 1, "revision": 23, "tasks": {}, "releases": {}, "signals": [legacy]}
+        s.atomic_json(self.store.path, saved)
+        self.assertEqual(self.store.read(), saved)
+        self.assertNotIn("workflow_observations", self.store.read())
+        s.record_workflow(self.store, legacy)
+        state = self.store.read()
+        self.assertEqual(state["revision"], 24)
+        self.assertEqual(state["schema_version"], 1)
+        self.assertIsNone(state["signals"][0]["run_attempt"])
+        self.assertEqual(state["signals"][0]["attempt_evidence"], "legacy_unproven")
+        self.assertEqual(state["workflow_observations"][0]["conclusion"], "success")
+        self.assertEqual(state["workflow_observations"][0]["observed_at"], legacy["observed_at"])
+        before = self.store.path.read_bytes()
+        s.record_workflow(self.store, legacy)
+        self.assertEqual(self.store.path.read_bytes(), before)
+
+    def test_legacy_receipt_stays_importable_without_claiming_attempt_one(self):
+        s.record_workflow(self.store, self.legacy())
+        self.assertIsNone(self.store.read()["signals"][0]["run_attempt"])
+        self.assert_rejected_unchanged(self.legacy(conclusion="failure", observed=40), "immutable")
+        self.assert_rejected_unchanged(self.legacy(observed=20), "Stale workflow observation")
+
+    def test_old_event_cannot_resolve_legacy_attempt_but_fresh_latest_api_can(self):
+        s.record_workflow(self.store, self.legacy(observed=30))
+        self.assert_rejected_unchanged(self.receipt(updated=20, observed=40), "Legacy attempt is unproven")
+        s.record_workflow(self.store, self.receipt(updated=20, observed=40, attempt_evidence="github_api_latest"))
+        state = self.store.read()
+        self.assertEqual(state["signals"][0]["run_attempt"], 1)
+        self.assertIsNone(state["workflow_observations"][0]["run_attempt"])
+        self.assertEqual(state["workflow_observations"][0]["attempt_evidence"], "legacy_unproven")
+
+    def test_later_rerun_event_can_supersede_legacy_without_relabeling_history(self):
+        s.record_workflow(self.store, self.legacy(conclusion="failure", observed=30))
+        s.record_workflow(self.store, self.receipt(attempt=2, updated=40))
+        self.assertEqual(self.store.read()["signals"][0]["run_attempt"], 2)
+        self.assertIsNone(self.store.read()["workflow_observations"][0]["run_attempt"])
+        self.assert_rejected_unchanged(self.legacy(observed=50), "cannot replace a proven")
+
+    def test_run_identity_cannot_change_sha_on_a_rerun_or_historical_event(self):
+        s.record_workflow(self.store, self.receipt(attempt=2, updated=30))
+        for attempt in (1, 3):
+            self.assert_rejected_unchanged(self.receipt(attempt=attempt, updated=40, source_sha="b" * 40),
+                                           "cannot change its source SHA")
+
+    def test_environment_receipt_cannot_attest_final_result(self):
+        current = self.receipt(status="in_progress", conclusion="CONTINUITY_CHECKS_OBSERVED",
+                               run_updated_at=None, attempt_evidence="github_run_environment")
+        s.record_workflow(self.store, current)
+        self.assert_rejected_unchanged(dict(current, run_status="completed", conclusion="success"),
+                                       "environment cannot attest")
+        s.record_workflow(self.store, self.receipt(updated=30))
+        self.assertEqual(self.store.read()["signals"][0]["conclusion"], "success")
+
+    def test_invalid_attempt_and_missing_freshness_never_written(self):
+        for update in (self.receipt(run_attempt=True), self.receipt(run_attempt=0),
+                       self.receipt(run_attempt=None), self.receipt(run_updated_at=None),
+                       self.receipt(workflow_run_id=True)):
+            with self.assertRaises(s.Problem):
+                s.record_workflow(self.store, update)
+            self.assertFalse(self.store.path.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

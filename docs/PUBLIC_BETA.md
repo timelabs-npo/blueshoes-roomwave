@@ -9,12 +9,31 @@ The helper is restricted to:
 | App | `6837899703` |
 | Bundle | `org.timelabs.moleculefoundry` |
 | Prerelease version/platform | `0.3.0` / `IOS` |
-| Build | An explicitly supplied Apple build UUID, verified through its app and prerelease relationships |
+| Reviewed source | An independently supplied full 40-character source SHA, matching the accepted release receipt |
+| Build | Exact compiled/upload/processing receipt identity and Apple UUID, verified again through live app/prerelease/build reads |
 | Build eligibility | `VALID`, `APP_STORE_ELIGIBLE`, `expired=false`, future expiration |
 | External group | `Roomwave Public Beta`, restricted to the exact build |
 | Public enrollment cap | 200, limit enabled |
 
-The existing 0.2.0 internal pilot cannot pass these identity checks. An archive, upload receipt or successful CI run is not a substitute for Apple's observed build state.
+The existing 0.2.0 internal pilot cannot pass these identity checks. Another eligible 0.3.0 build cannot substitute for the reviewed source/build either. Receipts and fresh Apple state are both required; neither alone establishes the full promotion identity.
+
+## Exact release evidence
+
+Every action, including read-only preflight, requires `--source-sha`, `--compiled-identity-receipt`, `--release-receipt`, and `--processing-receipt` in addition to `--build-id`. The source SHA must be the independently reviewed source, not a value selected merely because a receipt contains it.
+
+Retrieve all three receipts from the **trusted protected release-run artifact for that source**. Verify the artifact's repository, workflow/run and commit provenance before invoking the helper. JSON fields are not cryptographic attestations: the helper checks their consistency with each other and live Apple state; it cannot authenticate the origin of a caller-supplied file. Never manufacture or hand-edit evidence to unblock promotion.
+
+The existing receipt formats remain supported:
+
+| Input | Required identity/evidence fields |
+| --- | --- |
+| Compiled IPA identity | `bundle`, `version`, `build`, `identity_verified: true`, `usesNonExemptEncryption: false` |
+| Accepted release | `commit`, `app_store_app_id`, `bundle_identifier`, `version`, `build`, `signature_verified: true`, `upload_accepted: true`, 64-character hexadecimal `ipa_sha256` |
+| Apple processing | `app_id`, `version`, `build`, `apple_build_id`, `apple_processing: "VALID"` |
+
+The source SHA, app, bundle, version, build number and Apple UUID must agree exactly. Optional source/app/bundle/UUID/IPA-digest bindings, when supplied, must also agree. A signed-but-not-uploaded release receipt is insufficient. All fresh Apple inspections repeat the exact build-number binding, including the final public-link readback. Extended workflow/allocation fields may remain in these receipts without changing the three required schemas.
+
+The JavaScript interface is `execute({ sourceSHA, compiledIdentity, releaseReceipt, processingReceipt, ... })`. The exported `verifyPromotionEvidence(evidence, buildID)` performs the local receipt check. Successful operation receipts preserve `source_sha`, `ipa_sha256` and `promotion_evidence_verified: true`; that flag means the checks above passed under the documented trusted-operator input boundary.
 
 ## Protected inputs
 
@@ -27,7 +46,7 @@ Use Node 22 or later and the existing protected release environment:
 
 The helper constructs a short-lived ES256 JWT in memory. It accepts only the fixed Apple API origin, refuses redirects, bounds each request, and never prints key/token values or Apple error details that could echo private input. It has no hardcoded secret-file path. Do not put credential values into commands, task manifests, output logs, GitHub issue text or this repository.
 
-The real Beta App Review contact remains required. Supply it in a private JSON file **outside the repository**, with owner-only file permissions on POSIX and an appropriately restricted ACL on Windows. Its keys are `firstName`, `lastName`, `email`, and `phone`; the phone must begin with `+` and its country code. These fields must identify a real available person. No name, email or phone is invented by the helper. It can reuse a complete existing Apple contact after one has been entered privately.
+The real Beta App Review contact remains required. Supply it in a private JSON file **outside the repository**, with owner-only file permissions on POSIX and an appropriately restricted ACL on Windows. Its keys are `firstName`, `lastName`, `email`, and `phone`; the phone must begin with `+` and a nonzero country-code digit, and contain 8–15 digits after spaces, parentheses and hyphens are removed. Punctuation does not count toward that digit requirement. This is a structural check, not proof of number assignment or reachability. These fields must identify a real available person. No name, email or phone is invented by the helper. It can reuse a complete existing Apple contact after one has been entered privately.
 
 The contact file's values are used only in the Apple review-detail PATCH. Receipts record whether contact information is present, never its values. The existing Apple `feedbackEmail` is reused in memory without printing or writing its value to receipts. A missing feedback email blocks staging; the helper does not guess one.
 
@@ -54,6 +73,10 @@ Choose one protected, persistent operator directory for the app and reuse it for
 ```sh
 node scripts/release/public-beta.mjs preflight \
   --build-id EXACT_APPLE_BUILD_UUID \
+  --source-sha REVIEWED_FULL_SOURCE_SHA \
+  --compiled-identity-receipt /private/release/ipa-identity.json \
+  --release-receipt /private/release/release-receipt.json \
+  --processing-receipt /private/release/apple-processing.json \
   --contact-file /private/operator/review-contact.json \
   --state-dir /private/operator/roomwave-public-beta
 ```
@@ -67,6 +90,10 @@ An action without `--apply` remains a read-only preview. `submit` previews addit
 ```sh
 node scripts/release/public-beta.mjs stage --apply \
   --build-id EXACT_APPLE_BUILD_UUID \
+  --source-sha REVIEWED_FULL_SOURCE_SHA \
+  --compiled-identity-receipt /private/release/ipa-identity.json \
+  --release-receipt /private/release/release-receipt.json \
+  --processing-receipt /private/release/apple-processing.json \
   --contact-file /private/operator/review-contact.json \
   --state-dir /private/operator/roomwave-public-beta
 ```
@@ -80,6 +107,10 @@ The helper refuses an ambiguous group name, an internal target group, access-to-
 ```sh
 node scripts/release/public-beta.mjs submit --apply \
   --build-id EXACT_APPLE_BUILD_UUID \
+  --source-sha REVIEWED_FULL_SOURCE_SHA \
+  --compiled-identity-receipt /private/release/ipa-identity.json \
+  --release-receipt /private/release/release-receipt.json \
+  --processing-receipt /private/release/apple-processing.json \
   --state-dir /private/operator/roomwave-public-beta
 ```
 
@@ -92,10 +123,14 @@ Repeated invocation reuses `WAITING_FOR_REVIEW`, `IN_REVIEW` or `APPROVED` submi
 ```sh
 node scripts/release/public-beta.mjs enable-public-link --apply \
   --build-id EXACT_APPLE_BUILD_UUID \
+  --source-sha REVIEWED_FULL_SOURCE_SHA \
+  --compiled-identity-receipt /private/release/ipa-identity.json \
+  --release-receipt /private/release/release-receipt.json \
+  --processing-receipt /private/release/apple-processing.json \
   --state-dir /private/operator/roomwave-public-beta
 ```
 
-This requires the exact build's review submission to report **`APPROVED`** and its external state to report **`BETA_APPROVED` or `IN_BETA_TESTING`**. Eligibility, group membership and approval are refreshed immediately before enabling. The helper then reads back the enabled link and 200-person cap.
+This requires the exact build's review submission to report **`APPROVED`** and its external state to report **`BETA_APPROVED` or `IN_BETA_TESTING`**. Eligibility, group membership and approval are refreshed immediately before enabling. The final readback must simultaneously satisfy the complete staging predicate—reviewed metadata, contact, notification setting, exact build membership and cap—plus the approved state and enabled valid public URL. A removed membership or changed metadata after the PATCH yields a blocker, not `PUBLIC_LINK_ENABLED`; the receipt still preserves the already-observed mutation for reconciliation.
 
 The result is `PUBLIC_LINK_ENABLED` with the actual Apple URL. It separately reports whether the build is already `IN_BETA_TESTING`. It always leaves `tester_access_verified=false`: an actual external installation still needs observation. No notification endpoint is called. If Apple still requires an activation/notification step for availability, that remains an explicit coordinator action with appropriate messaging authorization; the script does not present a merely enabled link as a verified installation.
 

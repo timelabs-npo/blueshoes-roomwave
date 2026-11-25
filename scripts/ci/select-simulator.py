@@ -19,6 +19,7 @@ import uuid
 
 VERSION = re.compile(r"([0-9]+)\.([0-9]+)(?:\.([0-9]+))?\Z")
 RUNTIME_ID = re.compile(r"com\.apple\.CoreSimulator\.SimRuntime\.iOS-([0-9]+)-([0-9]+)(?:-([0-9]+))?\Z")
+DEVICE_RUNTIME_ID = re.compile(r"com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9]+-[0-9]+(?:-[0-9]+)?-iPhone[0-9]+-[0-9]+\Z")
 UDID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\Z")
 PRERELEASE = re.compile(r"\b(?:beta|alpha|seed|preview|rc|release\s+candidate|internal)\b", re.IGNORECASE)
 
@@ -59,6 +60,11 @@ def select_simulator(devices_document, runtimes_document, sdk_version, model):
         if not isinstance(identifier, str) or not identifier.startswith("com.apple.CoreSimulator.SimRuntime.iOS-"):
             continue
         if runtime.get("isAvailable") is not True:
+            continue
+        # simctl also inventories device-specific runtimes, e.g. the observed
+        # iOS-27-2-iPhone19-4. They are not the general SDK runtime selected by
+        # this policy; their presence must not invalidate an installed match.
+        if DEVICE_RUNTIME_ID.fullmatch(identifier):
             continue
         name = runtime.get("name")
         require(isinstance(name, str) and name, "INVALID_RUNTIME_NAME", "Available iOS runtime has no name.")

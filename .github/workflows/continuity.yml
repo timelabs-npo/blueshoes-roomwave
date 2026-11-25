@@ -9,6 +9,9 @@ on:
       - 'tests/ci/**'
       - 'tests/continuity/**'
       - 'scripts/release/public-beta.mjs'
+      - 'scripts/release/release-allocation.py'
+      - 'scripts/release/export-ios.sh'
+      - 'scripts/release/upload-ios.sh'
       - 'scripts/release/finalize-internal.mjs'
       - 'ops/tasks/**'
       - 'docs/CONTINUITY.md'
@@ -49,7 +52,7 @@ jobs:
       - name: Preserve reviewable event receipt
         uses: actions/upload-artifact@v4
         with:
-          name: roomwave-continuity-${{ github.run_id }}
+          name: roomwave-continuity-${{ github.run_id }}-${{ github.run_attempt }}
           path: build/continuity/event.json
           retention-days: 14
           if-no-files-found: error

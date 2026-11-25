@@ -108,7 +108,7 @@ Repeat for presentation/experience using their frozen ownership lists. A complet
 
 ## Release receipts and public-beta blockers
 
-The signed release path stays under its existing protected environment. This supervisor has no upload implementation. The current workflow derives its build number from GitHub's allocated run number and attempt (`1000 + run_number`, followed by `.` and `run_attempt`). A **cooperating release coordinator** dispatches the exact reviewed main SHA once, reads the allocated run identity, and reserves that exact app/version/build before approving the protected release job. The validation job does not upload. Never guess the next run number or approve/upload before the claim succeeds:
+The signed release path stays under its existing protected environment. This supervisor has no upload implementation. The current workflow allocates `(1000 + run_number).1` only on the first attempt of an explicit dispatch. Signed release reruns are blocked: reconcile the preserved allocation and upload intent instead of assigning a new attempt-derived binary. Allocation and exact signed-binary intent artifacts are preserved before upload, and the upload step consumes an intent once. A **cooperating release coordinator** dispatches the exact reviewed main SHA once, reads the allocated run identity, and reserves that exact app/version/build before approving the protected release job. The validation job does not upload. Never guess the next run number or approve/upload before the claim succeeds:
 
 ```json
 {
