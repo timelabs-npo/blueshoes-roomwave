@@ -7,7 +7,9 @@ struct ArcadeRootView: View {
     @ObservedObject var session: ArcadeSession
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var systemReducedMotion
+    @Environment(\.openURL) private var openURL
     @State private var settingsPresented = false
+    @State private var creatorPresented = false
     @State private var sharePayload: ArcadeSharePayload?
     @State private var shareError: String?
     private let ink = Color(red: 0.025, green: 0.04, blue: 0.08)
@@ -29,7 +31,8 @@ struct ArcadeRootView: View {
                         .accessibilityElement(children: .ignore)
                         .accessibilityAddTraits(.isButton)
                         .accessibilityLabel("Surf control")
-                        .accessibilityHint("Hold to charge, release to launch. Hold in the air to dive.")
+                        .accessibilityHint("Hold to charge, release to launch. Hold in the air to dive, then release before landing.")
+                        .accessibilityIdentifier("arcade.surf")
                         .accessibilityAction(named: "Hold to charge or dive") { session.setPressed(true) }
                         .accessibilityAction(named: "Release to launch") { session.setPressed(false) }
                 }
@@ -62,10 +65,13 @@ struct ArcadeRootView: View {
             await session.bootstrap()
         }
         .onOpenURL { session.handle(url: $0) }
-        .onChange(of: scenePhase) { _, phase in session.setActive(phase == .active) }
+        .onChange(of: scenePhase) { _, phase in session.setActive(phase == .active && !creatorPresented) }
         .onChange(of: systemReducedMotion) { _, value in session.setSystemReducedMotion(value) }
         .onDisappear { session.pause() }
         .sheet(isPresented: $settingsPresented) { settings }
+        .sheet(isPresented: $creatorPresented, onDismiss: { session.setActive(scenePhase == .active) }) {
+            ArcadeCreatorView { session.useInspiredCourse($0) }
+        }
         .sheet(item: $sharePayload) { ArcadeShareSheet(payload: $0) }
         .alert("Could not share", isPresented: Binding(get: { shareError != nil },
             set: { if !$0 { shareError = nil } })) {
@@ -82,6 +88,7 @@ struct ArcadeRootView: View {
                     Image(systemName: "slider.horizontal.3").font(.title3)
                         .frame(width: 48, height: 48)
                 }.accessibilityLabel("Sound, haptics and motion settings")
+                    .accessibilityIdentifier("arcade.settings")
             }
             Spacer(minLength: compact ? 10 : 70)
             VStack(spacing: 12) {
@@ -100,14 +107,26 @@ struct ArcadeRootView: View {
                         Capsule().fill(id == session.selectedID ? teal : .white.opacity(0.25))
                             .frame(width: id == session.selectedID ? 24 : 6, height: 4)
                     }
-                }.accessibilityLabel("Course \((ArcadeProfile.courseIDs.firstIndex(of: session.selectedID) ?? 0) + 1) of 3")
+                }.accessibilityLabel(ArcadeProfile.courseIDs.contains(session.selectedID)
+                    ? "Course \((ArcadeProfile.courseIDs.firstIndex(of: session.selectedID) ?? 0) + 1) of 3"
+                    : "Locally created course")
                 if let best = session.selectedBest {
                     Text("BEST \(best.score.formatted())  ·  \(best.medal.rawValue.uppercased())")
                         .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(gold)
                 }
             }
             primary("PLAY", symbol: "play.fill") { session.play() }
+                .accessibilityIdentifier("arcade.play")
                 .disabled(session.isLoading || session.course == nil)
+            Button {
+                session.setActive(false)
+                creatorPresented = true
+            } label: {
+                Label("Create a current", systemImage: "sparkles.rectangle.stack")
+                    .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+            }
+            .accessibilityIdentifier("arcade.creator")
+            .disabled(session.isLoading)
             if !compact {
                 Text("HOLD TO CHARGE  ·  RELEASE TO SOAR")
                     .font(.system(size: 10, weight: .semibold)).tracking(1.5).foregroundStyle(.white.opacity(0.72))
@@ -163,7 +182,7 @@ struct ArcadeRootView: View {
                 Button { session.pause() } label: {
                     Image(systemName: "pause.fill").font(.title3).frame(width: 48, height: 48)
                         .background(ink.opacity(0.6), in: Circle())
-                }.accessibilityLabel("Pause run")
+                }.accessibilityLabel("Pause run").accessibilityIdentifier("arcade.pause")
             }
         }.padding(.horizontal, 22).padding(.vertical, 12)
     }
@@ -175,9 +194,11 @@ struct ArcadeRootView: View {
                 Text("TAKE A BREATH").font(.system(size: 26, weight: .bold)).tracking(2)
                 Text("Your current is waiting.").font(.subheadline).foregroundStyle(.white.opacity(0.7))
                 primary("RESUME", symbol: "play.fill") { session.resume() }
+                    .accessibilityIdentifier("arcade.resume")
                 HStack(spacing: 24) {
                     secondary("Restart", symbol: "arrow.clockwise") { session.play() }
                     secondary("Home", symbol: "house") { session.home() }
+                        .accessibilityIdentifier("arcade.home")
                 }
             }.padding(28).frame(maxWidth: 440)
         }
@@ -231,6 +252,7 @@ struct ArcadeRootView: View {
             Text(session.title.uppercased()).font(.caption.weight(.medium)).tracking(2)
                 .foregroundStyle(.white.opacity(0.7))
             primary("RETRY", symbol: "arrow.clockwise") { session.play() }
+                .accessibilityIdentifier("arcade.retry")
             HStack(spacing: 24) {
                 secondary("Courses", symbol: "water.waves") { session.home() }
                 secondary("Share run", symbol: "square.and.arrow.up") {
@@ -238,6 +260,11 @@ struct ArcadeRootView: View {
                     catch { shareError = error.localizedDescription }
                 }
             }
+            Button("Open X composer") {
+                if let url = ArcadeSharing.xComposer(result: result, title: session.title) { openURL(url) }
+            }
+            .font(.footnote).foregroundStyle(.white.opacity(0.75)).frame(minHeight: 44)
+            .accessibilityHint("Opens your editable post. You choose whether to publish it.")
         }
     }
 
@@ -252,6 +279,7 @@ struct ArcadeRootView: View {
                 }
                 Text("Your progress and last replay stay in this app’s private storage. Sharing sends only the score card, run facts and a course link you choose to share.")
                     .font(.footnote).foregroundStyle(.secondary)
+                Link("Privacy policy", destination: URL(string: "https://github.com/timelabs-npo/blueshoes-roomwave/blob/main/docs/PRIVACY.md")!)
             }
             .navigationTitle("Preferences").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { settingsPresented = false } } }
@@ -288,7 +316,9 @@ struct ArcadeRootView: View {
     private func courseArrow(_ symbol: String, offset: Int) -> some View {
         Button { session.selectCourse(offset: offset) } label: {
             Image(systemName: symbol).font(.title3).frame(width: 44, height: 52)
-        }.accessibilityLabel(offset < 0 ? "Previous course" : "Next course").disabled(session.isLoading)
+        }.accessibilityLabel(offset < 0 ? "Previous course" : "Next course")
+            .accessibilityIdentifier(offset < 0 ? "arcade.previous-course" : "arcade.next-course")
+            .disabled(session.isLoading)
     }
 
     private func primary(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
@@ -313,6 +343,7 @@ struct ArcadeRootView: View {
     }
 
     private func bestComparison(_ score: Int) -> String {
+        guard ArcadeProfile.courseIDs.contains(session.selectedID) else { return "LOCAL CREATED COURSE" }
         guard let previous = session.previousBest else { return "FIRST RUN · PERSONAL BEST" }
         let delta = score - previous
         if delta > 0 { return "NEW BEST · +\(delta.formatted())" }

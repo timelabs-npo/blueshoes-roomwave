@@ -66,6 +66,10 @@ public enum SurfSimulation {
         guard state.phase == .running else { return SurfStep(state: state, events: []) }
         var s = state
         s.tick += 1
+        if input.cancelled {
+            s.charge = 0
+            s.previousPressed = false
+        }
         s.invulnerabilityTicks = max(0, s.invulnerabilityTicks - 1)
         let dt = 1 / Double(rules.tickRate)
         let oldPose = course.pose(at: state.distance)
@@ -91,7 +95,7 @@ public enum SurfSimulation {
         if s.grounded {
             if input.pressed {
                 s.charge = min(rules.maximumCharge, s.charge + rules.maximumCharge * dt / 0.65)
-            } else if state.previousPressed && s.charge >= rules.maximumCharge * 0.22 {
+            } else if s.previousPressed && s.charge >= rules.maximumCharge * 0.22 {
                 let compression = s.charge / rules.maximumCharge
                 s.verticalSpeed = min(18, max(4, 5 + compression * 8 + oldPose.slope * s.speed * 0.5))
                 s.speed = clampSpeed(s.speed + compression * 1.1 + max(0, -oldPose.slope) * 2)

@@ -30,6 +30,7 @@ final class ArcadeSession: ObservableObject {
     private var pendingCourseID: String?
     private var profileLoaded = false
     private var held = false
+    private var cancelInputOnNextTick = false
     private var dove = false
     private var isActive = true
     private var systemReducedMotion = false
@@ -51,7 +52,7 @@ final class ArcadeSession: ObservableObject {
         switch tutorialStage {
         case 0: return "HOLD TO CHARGE"
         case 1: return "RELEASE TO SOAR"
-        default: return "HOLD IN AIR TO DIVE"
+        default: return "HOLD TO DIVE · RELEASE BEFORE LANDING"
         }
     }
 
@@ -107,9 +108,18 @@ final class ArcadeSession: ObservableObject {
     }
 
     func selectCourse(offset: Int) {
-        guard !isLoading, let index = ArcadeProfile.courseIDs.firstIndex(of: selectedID) else { return }
+        guard !isLoading else { return }
+        let index = ArcadeProfile.courseIDs.firstIndex(of: selectedID) ?? (offset > 0 ? -1 : 0)
         let ids = ArcadeProfile.courseIDs
         requestCourse(ids[(index + offset + ids.count) % ids.count])
+    }
+
+    func useInspiredCourse(_ next: CompiledSurfCourse) {
+        guard next.definition.source == .photoInspired || next.definition.source == .lidarInspired else { return }
+        // Retain one local creation alongside the authored catalog, never raw input.
+        compiled = compiled.filter { ArcadeProfile.courseIDs.contains($0.key) }
+        compiled[next.definition.id] = next
+        requestCourse(next.definition.id)
     }
 
     private func requestCourse(_ id: String) {
@@ -152,7 +162,7 @@ final class ArcadeSession: ObservableObject {
 
     func play() {
         guard !isLoading, errorMessage == nil, isActive, let course else { return }
-        held = false; dove = false
+        held = false; dove = false; cancelInputOnNextTick = false
         accumulator = 0; lastHUDTime = 0; callout = ""; calloutUntil = 0
         inputs.removeAll(keepingCapacity: true)
         state = SurfSimulation.start(course: course, rules: rules)
@@ -170,9 +180,11 @@ final class ArcadeSession: ObservableObject {
     }
 
     func pause() {
+        if screen == .playing { cancelInputOnNextTick = true }
         held = false
         stopClock(); audio.stop()
         if screen == .playing { screen = .paused }
+        observeEvidence()
     }
 
     func resume() {
@@ -239,11 +251,18 @@ final class ArcadeSession: ObservableObject {
     fileprivate func frame(_ link: CADisplayLink) {
         guard isActive else { return }
         let now = link.timestamp
-        let elapsed = min(0.1, max(0, now - (lastTimestamp ?? now)))
+        let rawElapsed = now - (lastTimestamp ?? now)
+        guard rawElapsed.isFinite, rawElapsed >= 0, rawElapsed <= 0.5 else {
+            pause()
+            statusMessage = "The run paused after an interruption. Resume when you are ready."
+            return
+        }
+        let elapsed = min(0.1, rawElapsed)
         lastTimestamp = now
         if screen == .home {
             previewTime += elapsed
             scene.preview(time: previewTime, reducedMotion: reducedMotion)
+            observeEvidence()
             return
         }
         guard screen == .playing, let course, var current = state else { return }
@@ -255,8 +274,9 @@ final class ArcadeSession: ObservableObject {
             var steps = 0
             while accumulator >= tickDuration, steps < 6, current.phase == .running {
                 guard inputs.count < rules.maximumTicks else { throw SessionError.traceLimit }
-                let input = SurfInput(tick: current.tick, pressed: held)
+                let input = SurfInput(tick: current.tick, pressed: held, cancelled: cancelInputOnNextTick)
                 let step = try SurfSimulation.step(state: current, input: input, course: course, rules: rules)
+                cancelInputOnNextTick = false
                 inputs.append(input)
                 current = step.state
                 accumulator -= tickDuration
@@ -283,6 +303,7 @@ final class ArcadeSession: ObservableObject {
             // height remains the absolute rider-foot Y from the simulation, unmodified.
             scene.render(state: current, events: frameEvents, deltaTime: elapsed,
                          reducedMotion: reducedMotion, ghost: nil)
+            observeEvidence(events: frameEvents)
             if significant || now - lastHUDTime >= 0.1 {
                 publishHUD(now: now)
                 audio.update(speed: current.speed, charge: current.charge)
@@ -305,6 +326,14 @@ final class ArcadeSession: ObservableObject {
             rulesVersion: rules.version, inputs: inputs, finalState: final))
         statusMessage = profile.notice ?? audio.notice
         screen = .results
+        publishHUD(now: CACurrentMediaTime())
+        observeEvidence()
+    }
+
+    private func observeEvidence(events: [SurfEvent] = []) {
+        #if DEBUG
+        ArcadeEvidenceProbe.observe(state: state, course: course, screen: screen, events: events, view: scene.view)
+        #endif
     }
 
     private func publishHUD(now: Double) {

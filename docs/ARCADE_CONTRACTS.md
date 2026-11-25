@@ -31,6 +31,8 @@ Stable authored IDs: `neon-dawn`, `low-orbit`, `black-current`. A course begins 
 
 `step` advances exactly one fixed tick and requires `input.tick == state.tick`. It returns ordered one-shot events. `previousPressed` encodes release edges. Press builds grounded charge and increases airborne gravity; release can launch with enough charge. Timing and slope affect momentum and clean landings. Outcomes must remain finite/bounded, collision tests swept over progress, terminal state stable, and score arithmetic bounded. Do not award points for simply holding forever. Replay verification is local determinism, not server attestation.
 
+Coordinator integration amendment, 25 November: `SurfInput.cancelled` defaults to false. A true value clears prior held state and charge before this tick's controls; a new press may then start charging. The app records it on the first resumed tick after an interruption. This prevents an unintended launch while preserving exact replay. Rider collision spans foot+0.1...foot+0.9; ring collection tests foot+0.5. A clean landing requires releasing before touchdown; teach this after the initial charge/release action.
+
 Core behavior tests should show different timing gives different trajectory/score; successful intentional play and a distinct mistimed trace; encounters cannot tunnel at max speed; invalid course/input rejection; exact replay; stable terminal states. Do not create a test whose only achievement is a constant correcting bot surviving an empty course.
 
 ## Presentation

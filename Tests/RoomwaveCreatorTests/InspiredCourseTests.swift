@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 import RoomwaveCore
 import RoomwaveArcade

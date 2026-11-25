@@ -107,7 +107,12 @@ public struct SurfRules: Codable, Equatable, Sendable {
 public struct SurfInput: Codable, Equatable, Sendable {
     public let tick: Int
     public let pressed: Bool
-    public init(tick: Int, pressed: Bool) { self.tick = tick; self.pressed = pressed }
+    /// Explicit interruption cancellation is recorded, so a resumed run does not
+    /// turn a cleared finger into an unintended release/launch edge.
+    public let cancelled: Bool
+    public init(tick: Int, pressed: Bool, cancelled: Bool = false) {
+        self.tick = tick; self.pressed = pressed; self.cancelled = cancelled
+    }
 }
 
 public struct SurfState: Codable, Equatable, Sendable {

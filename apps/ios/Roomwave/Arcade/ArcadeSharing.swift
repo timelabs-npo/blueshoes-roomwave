@@ -6,20 +6,19 @@ struct ArcadeSharePayload: Identifiable {
     let id = UUID()
     let image: UIImage
     let text: String
-    let challenge: URL
+    let challenge: URL?
 }
 
 @MainActor
 enum ArcadeSharing {
     static func make(result: SurfRunResult, title: String) throws -> ArcadeSharePayload {
-        guard ArcadeProfile.courseIDs.contains(result.courseID),
-              result.rulesVersion == SurfRules.standard.version else { throw ShareError.unsupported }
+        guard result.rulesVersion == SurfRules.standard.version else { throw ShareError.unsupported }
         var components = URLComponents()
         components.scheme = "roomwave"
         components.host = "challenge"
         components.queryItems = [URLQueryItem(name: "course", value: result.courseID),
                                  URLQueryItem(name: "rules", value: "3")]
-        guard let url = components.url else { throw ShareError.unsupported }
+        let url = ArcadeProfile.courseIDs.contains(result.courseID) ? components.url : nil
         let renderer = ImageRenderer(content: ArcadeResultCard(result: result, title: title)
             .frame(width: 540, height: 720).environment(\.colorScheme, .dark))
         renderer.scale = 2
@@ -28,8 +27,21 @@ enum ArcadeSharing {
         let text = "ROOMWAVE · SLIPSTREAM\n\(title) · \(result.score.formatted()) points\n"
             + "\(result.completed ? "Complete" : "Run ended") · \(medalText)\n"
             + "\(result.rings) rings · \(result.perfectLandings) perfect landings · ×\(result.bestCombo) best combo\n"
-            + "Rules: \(result.rulesVersion)\nPlay this course in Roomwave."
+            + "Rules: \(result.rulesVersion)\n"
+            + (url == nil ? "A locally created course; no shared challenge link in this beta." : "Play this course in Roomwave.")
         return ArcadeSharePayload(image: image, text: text, challenge: url)
+    }
+
+    /// User-invoked editable web intent; it neither uploads a local card/video
+    /// nor confirms that anything was posted.
+    static func xComposer(result: SurfRunResult, title: String) -> URL? {
+        guard result.rulesVersion == SurfRules.standard.version else { return nil }
+        var components = URLComponents()
+        components.scheme = "https"; components.host = "x.com"; components.path = "/intent/tweet"
+        let text = "\(result.score) points in ROOMWAVE · \(title). \(result.rings) rings, \(result.perfectLandings) perfect landings. #indiedev #iOSgaming"
+        components.queryItems = [URLQueryItem(name: "text", value: text),
+            URLQueryItem(name: "url", value: "https://github.com/timelabs-npo/blueshoes-roomwave")]
+        return components.url
     }
 
     private enum ShareError: LocalizedError {
@@ -47,7 +59,9 @@ struct ArcadeShareSheet: UIViewControllerRepresentable {
     let payload: ArcadeSharePayload
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: [payload.image, payload.text, payload.challenge],
+        var items: [Any] = [payload.image, payload.text]
+        if let challenge = payload.challenge { items.append(challenge) }
+        let controller = UIActivityViewController(activityItems: items,
                                                   applicationActivities: nil)
         // The SwiftUI sheet supplies presentation; anchoring also supports iPad popovers.
         controller.popoverPresentationController?.sourceView = controller.view

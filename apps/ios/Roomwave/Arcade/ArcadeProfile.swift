@@ -54,11 +54,11 @@ final class ArcadeProfile {
             directory = folder
             let url = folder.appendingPathComponent("profile.json")
             guard FileManager.default.fileExists(atPath: url.path) else { return }
-            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-            guard ((attributes[.size] as? NSNumber)?.intValue ?? Int.max) <= 128_000 else {
-                throw StoreError.oversized
-            }
-            let record = try JSONDecoder().decode(Record.self, from: Data(contentsOf: url))
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let data = try handle.read(upToCount: 128_001) ?? Data()
+            guard data.count <= 128_000 else { throw StoreError.oversized }
+            let record = try JSONDecoder().decode(Record.self, from: data)
             guard record.schemaVersion == nil || record.schemaVersion == 1 else {
                 throw StoreError.newerVersion
             }
