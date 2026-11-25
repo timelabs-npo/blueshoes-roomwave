@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-mkdir -p build/release
+python3 - <<'PY'
+from datetime import datetime, timezone
+from pathlib import Path
+from uuid import uuid4
+release = Path('build/release')
+if release.exists():
+    history = Path('build/native-history')
+    history.mkdir(parents=True, exist_ok=True)
+    attempt = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid4().hex[:8]
+    release.rename(history / attempt)
+release.mkdir(parents=True)
+PY
 python3 scripts/ci/run-bounded.py --seconds 300 --label core-tests -- swift test --parallel
 xcodegen generate --spec apps/ios/project.yml --project apps/ios
 xcrun simctl list devices available --json > build/release/simulators.json
