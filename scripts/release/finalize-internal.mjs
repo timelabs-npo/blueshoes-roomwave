@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 // Existing internal group only. No upload, tester creation, invitation, or notification.
 import { APP, BUNDLE, VERSION, DEFAULT_CONTENT, MARKETING_URL, PRIVACY_URL,
-  protectedClient, checkPublicURLs, Journal } from './public-beta.mjs';
+  protectedClient, checkPublicURLs, validateContent, Journal } from './public-beta.mjs';
 import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, fsyncSync, renameSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const INTERNAL_GROUP = '5a93cfb4-bd7c-4c0c-acbd-ade02816d8c1';
-export const INTERNAL_WHATS_NEW = `${DEFAULT_CONTENT.whatsNew}\nFor a clean landing, release before touchdown. Hold in the air to dive, then release as you approach the road.`;
+// Both distribution lanes must agree so internal reconciliation cannot invalidate
+// the exact metadata readback required before an external review submission.
+export const INTERNAL_WHATS_NEW = DEFAULT_CONTENT.whatsNew;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const attributes = row => row?.attributes ?? {};
 const stamp = () => new Date().toISOString();
@@ -80,11 +82,11 @@ export function verifyCompiledIdentity(receipt, build) {
   return true;
 }
 
-function desiredApp(snapshot) {
+function desiredApp(snapshot, content) {
   const feedbackEmail = attributes(snapshot.appLocale).feedbackEmail;
   requireThat(typeof feedbackEmail === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(feedbackEmail),
     'BLOCKED_METADATA', 'Existing feedback email is missing; no email will be guessed');
-  return { description: DEFAULT_CONTENT.description, marketingUrl: MARKETING_URL, privacyPolicyUrl: PRIVACY_URL, feedbackEmail };
+  return { description: content.description, marketingUrl: MARKETING_URL, privacyPolicyUrl: PRIVACY_URL, feedbackEmail };
 }
 
 function observed(snapshot, apply) {
@@ -98,11 +100,13 @@ function observed(snapshot, apply) {
     tester_installation_verified: false, external_review_contact_required: false };
 }
 
-export async function executeInternal({ api, buildID, apply = false, compiledIdentity = null, journal = null, urlCheck = checkPublicURLs }) {
+export async function executeInternal({ api, buildID, apply = false, compiledIdentity = null, journal = null,
+  content = DEFAULT_CONTENT, urlCheck = checkPublicURLs }) {
   let report = { schema_version: 1, observed_at: stamp(), app_id: APP, bundle_id: BUNDLE, version: VERSION,
     apple_build_id: UUID.test(buildID ?? '') ? buildID : null, apply_requested: apply, mutations: [], blockers: [],
     tester_installation_verified: false, external_review_contact_required: false };
   try {
+    content = validateContent(content);
     let snapshot = await inspectInternal(api, buildID);
     report = { ...report, ...observed(snapshot, apply) };
     const compiledVerified = verifyCompiledIdentity(compiledIdentity, snapshot.build);
@@ -111,19 +115,19 @@ export async function executeInternal({ api, buildID, apply = false, compiledIde
     requireThat(declaration !== true, 'BLOCKED_ENCRYPTION_CONFLICT', 'Apple currently declares non-exempt encryption; inspect the conflict rather than overwriting it');
     requireThat(declaration === false || compiledVerified, 'BLOCKED_ENCRYPTION_EVIDENCE',
       'An unset Apple encryption declaration requires a matching compiled-app receipt with explicit usesNonExemptEncryption=false');
-    const appAttributes = desiredApp(snapshot);
+    const appAttributes = desiredApp(snapshot, content);
     await urlCheck();
     report.public_metadata_urls_verified = true;
     if (snapshot.buildLocale) journal?.observe(`build-locale:${buildID}:en-US`, snapshot.buildLocale.id);
     if (snapshot.groupBuilds.some(row => row.id === buildID)) journal?.observe(`associate:${INTERNAL_GROUP}:${buildID}`, buildID);
     const metadataMatches = value => equalFields(attributes(value.appLocale), appAttributes)
-      && attributes(value.buildLocale).whatsNew === INTERNAL_WHATS_NEW
+      && attributes(value.buildLocale).whatsNew === content.whatsNew
       && attributes(value.detail).autoNotifyEnabled === false && attributes(value.build).usesNonExemptEncryption === false;
     if (!apply) {
       report.state = 'PREFLIGHT_READY';
       report.metadata_staged = metadataMatches(snapshot);
       report.internal_beta_available = metadataMatches(snapshot) && report.exact_build_associated && report.internal_build_state === 'IN_BETA_TESTING';
-      report.proposed_whats_new = INTERNAL_WHATS_NEW;
+      report.proposed_whats_new = content.whatsNew;
       report.proposed_metadata_fields = ['description', 'marketingUrl', 'privacyPolicyUrl', 'feedbackEmail (reused privately)'];
       report.encryption_change_required = declaration !== false;
       return report;
@@ -149,11 +153,11 @@ export async function executeInternal({ api, buildID, apply = false, compiledIde
       await patch(`betaAppLocalizations/${safeID(snapshot.appLocale.id)}`, resource('betaAppLocalizations', snapshot.appLocale.id, appAttributes));
     }
     if (snapshot.buildLocale) {
-      if (attributes(snapshot.buildLocale).whatsNew !== INTERNAL_WHATS_NEW) await patch(`betaBuildLocalizations/${safeID(snapshot.buildLocale.id)}`,
-        resource('betaBuildLocalizations', snapshot.buildLocale.id, { whatsNew: INTERNAL_WHATS_NEW }));
+      if (attributes(snapshot.buildLocale).whatsNew !== content.whatsNew) await patch(`betaBuildLocalizations/${safeID(snapshot.buildLocale.id)}`,
+        resource('betaBuildLocalizations', snapshot.buildLocale.id, { whatsNew: content.whatsNew }));
     } else {
       await post(`build-locale:${buildID}:en-US`, 'betaBuildLocalizations', resource('betaBuildLocalizations', null,
-        { locale: 'en-US', whatsNew: INTERNAL_WHATS_NEW }, { build: { data: { type: 'builds', id: buildID } } }));
+        { locale: 'en-US', whatsNew: content.whatsNew }, { build: { data: { type: 'builds', id: buildID } } }));
     }
     if (!snapshot.groupBuilds.some(row => row.id === buildID)) {
       await post(`associate:${INTERNAL_GROUP}:${buildID}`, `betaGroups/${INTERNAL_GROUP}/relationships/builds`, { data: [{ type: 'builds', id: buildID }] });
@@ -191,13 +195,13 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     requireThat(Number(process.versions.node.split('.')[0]) >= 22, 'BLOCKED_RUNTIME', 'Node 22 or later is required');
     if (argv.includes('--help')) {
-      console.log('finalize-internal.mjs --build-id UUID [--apply] [--compiled-identity-receipt PATH] [--state-dir PRIVATE_DIRECTORY]');
+      console.log('finalize-internal.mjs --build-id UUID [--apply] [--compiled-identity-receipt PATH] [--content-file REVIEWED_JSON] [--state-dir PRIVATE_DIRECTORY]');
       return 0;
     }
     for (let index = 0; index < argv.length; index += 1) {
       const flag = argv[index];
       if (flag === '--apply') { options.apply = true; continue; }
-      const keys = { '--build-id': 'buildID', '--compiled-identity-receipt': 'identityPath', '--state-dir': 'stateDir' };
+      const keys = { '--build-id': 'buildID', '--compiled-identity-receipt': 'identityPath', '--content-file': 'contentPath', '--state-dir': 'stateDir' };
       requireThat(keys[flag] && argv[index + 1] && !argv[index + 1].startsWith('--'), 'BLOCKED_INPUT', 'Unknown option or missing value');
       options[keys[flag]] = argv[++index];
     }
@@ -209,7 +213,8 @@ export async function main(argv = process.argv.slice(2)) {
     }
     const api = protectedClient();
     journal = new Journal(options.stateDir);
-    const report = await executeInternal({ ...options, api, journal, compiledIdentity });
+    const content = options.contentPath ? JSON.parse(readFileSync(resolve(options.contentPath), 'utf8')) : DEFAULT_CONTENT;
+    const report = await executeInternal({ ...options, api, journal, compiledIdentity, content });
     atomicJSON(resolve(options.stateDir, `internal-${options.buildID}.json`), report);
     console.log(JSON.stringify(report, null, 2));
     return report.blockers.length ? 2 : 0;

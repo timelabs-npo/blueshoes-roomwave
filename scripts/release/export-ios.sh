@@ -129,4 +129,20 @@ Path('build/release/release-receipt.json').write_text(json.dumps(receipt,indent=
 PY
 if [[ "$ROOMWAVE_UPLOAD_ACCEPTED" == true ]]; then
   node scripts/release/apple-status.mjs processing
+  ROOMWAVE_PROCESSED_BUILD_ID=$(node --input-type=module -e '
+    import {readFileSync} from "node:fs";
+    const receipt = JSON.parse(readFileSync("build/release/apple-processing.json", "utf8"));
+    if (receipt.apple_processing === "VALID") {
+      if (!/^[0-9a-f-]{36}$/i.test(receipt.apple_build_id || "")) throw new Error("Missing processed build UUID");
+      process.stdout.write(receipt.apple_build_id);
+    }
+  ')
+  if [[ -n "$ROOMWAVE_PROCESSED_BUILD_ID" ]]; then
+    node scripts/release/finalize-internal.mjs --apply \
+      --build-id "$ROOMWAVE_PROCESSED_BUILD_ID" \
+      --compiled-identity-receipt build/release/ipa-identity.json \
+      --state-dir build/release/testflight-operations
+  else
+    echo 'Apple processing remains pending. Reconcile this upload before finalizing internal access; do not re-upload.'
+  fi
 fi

@@ -5,7 +5,11 @@ on:
   pull_request:
     paths:
       - 'scripts/continuity/**'
+      - 'scripts/ci/run-bounded.py'
+      - 'tests/ci/**'
       - 'tests/continuity/**'
+      - 'scripts/release/public-beta.mjs'
+      - 'scripts/release/finalize-internal.mjs'
       - 'ops/tasks/**'
       - 'docs/CONTINUITY.md'
       - '.github/workflows/continuity.yml'
@@ -31,10 +35,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.repository.default_branch || github.ref }}
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
       - name: Test bounded supervisor without Codex or credentials
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python3 -m unittest discover -s tests/continuity -v
+        run: |
+          python3 -m unittest discover -s tests/continuity -v
+          python3 -m unittest discover -s tests/ci -v
       - name: Record observed event only
         run: python3 scripts/continuity/workflow_receipt.py build/continuity/event.json
       - name: Preserve reviewable event receipt

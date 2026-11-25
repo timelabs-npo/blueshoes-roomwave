@@ -20,9 +20,11 @@ Independent corrections include ballistic encounter crossing, no rewards after a
 
 ## Engineering gates
 
-- Local coordinator: 34 continuity/public-beta helper tests passed on 25 November; shell, Node/Python syntax, plist/YAML parsing and whitespace checks passed. These do not execute iOS.
+- Local coordinator: 47 continuity/internal/public-beta helper tests and six owned-process deadline tests passed on 25 November; shell, Node/Python syntax, plist/YAML parsing and whitespace checks passed. These do not execute iOS.
 - GitHub continuity run [45678649976](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45678649976) passed for integration `e7f6468`.
-- Initial Mac native validation [45678649494](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45678649494) is the first v0.3 native gate; its outcome and any subsequent exact-source runs must be recorded in the delivery receipt.
+- Initial Mac native validation [45678649494](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45678649494), integration `e7f6468`: production Swift package tests, native compilation, and all six hosted native tests passed. The real UI test failed after 103 seconds because the app was already paused when it attempted the Pause action. The whole native gate is **FAILED**, not ready for release.
+- Actual screenshots from that run confirmed the false interruption message on Home and the rider obscured by the lower Home controls. The frame clock now drops bounded excess simulation time instead of treating slow frames as lifecycle events. Background/audio interruption still pauses explicitly. Camera composition and audio activation receive separate corrections before the next native run.
+- The recording observer also terminated on a CoreSimulator query timeout. Transient queries are now tolerated within an overall deadline. Failure paths preserve app-cache observations and export XCTest attachments, with command deadlines and reserved artifact-upload time. These changes still require a new native run.
 - UI automation uses the ordinary game and ordinary touch input. It must capture all three biome previews, charge/flight/landing, pause/background/resume, a genuine terminal result and retry. DEBUG observations use actual ARView snapshots and include course, run generation, request/capture ticks and asset hierarchy.
 - Simulator screenshots/video and deterministic traces are engineering evidence. They are not a human playtest or physical-device performance measurement.
 

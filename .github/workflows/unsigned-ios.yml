@@ -30,7 +30,7 @@ jobs:
       (github.event.pull_request.head.repo.full_name == github.repository &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association))
     runs-on: xcode-27
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -42,6 +42,7 @@ jobs:
         timeout-minutes: 6
         run: command -v xcodegen >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
       - name: Test core, actual touch flow, native render and unsigned archive
+        timeout-minutes: 38
         run: bash scripts/release/validate-native.sh
       - name: Preserve playable evidence and unsigned simulator app
         if: always()

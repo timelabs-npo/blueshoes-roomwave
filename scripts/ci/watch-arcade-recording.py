@@ -12,7 +12,9 @@ p.add_argument("--simulator", required=True)
 p.add_argument("--output", type=Path, required=True)
 args = p.parse_args()
 started = time.time()
-deadline = time.monotonic() + 300
+# Compilation and first simulator boot can exceed five minutes on a cold runner.
+# The parent validation process always stops this owned watcher on exit.
+deadline = time.monotonic() + 1800
 stopping = False
 child = None
 
@@ -26,16 +28,21 @@ signal.signal(signal.SIGTERM, stop)
 signal.signal(signal.SIGINT, stop)
 try:
     while not stopping and time.monotonic() < deadline:
-        result = subprocess.run(["xcrun", "simctl", "get_app_container", args.simulator,
-            "org.timelabs.moleculefoundry", "data"], text=True, capture_output=True, timeout=15)
+        try:
+            result = subprocess.run(["xcrun", "simctl", "get_app_container", args.simulator,
+                "org.timelabs.moleculefoundry", "data"], text=True, capture_output=True, timeout=15)
+        except subprocess.TimeoutExpired:
+            # CoreSimulator can be busy while the test app installs. The overall
+            # deadline still bounds this observer; a transient probe is not fatal.
+            continue
         if result.returncode == 0:
             marker = Path(result.stdout.strip()) / "Library/Caches/RoomwaveArcadeCaptures/home-dawn.json"
             if marker.is_file() and marker.stat().st_mtime >= started:
                 child = subprocess.Popen([sys.executable, "scripts/ci/record-arcade.py",
                     "--simulator", args.simulator, "--marker", str(marker), "--output", str(args.output)])
-                child.wait(timeout=195)
+                child.wait(timeout=255)
                 break
-        time.sleep(0.5)
+        time.sleep(1)
 finally:
     if child is not None and child.poll() is None:
         child.terminate()

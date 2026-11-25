@@ -24,7 +24,7 @@ node scripts/release/finalize-internal.mjs --apply \
 
 The optional compiled receipt must come from the verifier run against the actual compiled app/archive/IPA. Its relevant fields are `bundle`, `version`, `build`, `identity_verified: true`, and an **explicit Boolean `usesNonExemptEncryption: false`**. Bundle, marketing version and build number must exactly match the Apple build. An optional `apple_build_id` must also match. The receipt is trusted operator evidence, so do not manufacture or hand-edit a false declaration merely to pass this guard.
 
-If Apple already reports `usesNonExemptEncryption=false`, no receipt or encryption PATCH is required. If the Apple declaration is unset, the matching explicit compiled receipt is mandatory before setting it to false. If Apple reports true, the helper blocks the conflicting declaration even when a false receipt is supplied. A receipt that omits the explicit encryption field is insufficient. Root owns emitting that additional verifier field; this commit does not edit `verify-app.py`.
+If Apple already reports `usesNonExemptEncryption=false`, no receipt or encryption PATCH is required. If the Apple declaration is unset, the matching explicit compiled receipt is mandatory before setting it to false. If Apple reports true, the helper blocks the conflicting declaration even when a false receipt is supplied. A receipt that omits the explicit encryption field is insufficient. The compiled-app verifier emits this explicit field only after checking the actual Info.plist declaration.
 
 `--apply` then:
 
@@ -45,7 +45,11 @@ If membership is visible but Apple's state has not reached `IN_BETA_TESTING`, th
 
 This helper reuses the public-beta helper's single-operator `Journal`. Use the **same protected state directory** for related operator calls. Its on-disk names remain `public-beta-journal.json` and `public-beta.lock`; the journal is shared TestFlight operation evidence, not a public-enrollment action. An intent is persisted before localization/association POSTs. Matching readback resolves it; an uncertain outcome with no matching observed resource blocks a repeat POST. A stale lock is never automatically stolen. Inspect the original process before clearing one.
 
-The sanitized final receipt is `internal-BUILD_UUID.json` in that directory. Repeating an already completed finalization makes no duplicate localization/association and makes no unnecessary PATCH. Existing workflows are unchanged; root must explicitly wire or invoke the helper after reviewing it.
+The sanitized final receipt is `internal-BUILD_UUID.json` in that directory. Repeating an already completed finalization makes no duplicate localization/association and makes no unnecessary PATCH.
+
+The protected release script invokes this helper after the exact uploaded build reaches `VALID`, using its actual IPA identity receipt. It preserves the operation journal and sanitized internal receipt in the release artifact. If processing or activation remains pending, reconcile the same Apple build; do not upload again merely because the later stage is incomplete.
+
+Internal and external helpers share the same default description and `whatsNew`, including clean-landing instructions. If a reviewed custom `--content-file` is used, pass that same file to both helpers. Cross-helper regression tests run public staging, internal finalization, and public submission preflight and require the reviewed metadata to remain unchanged.
 
 ## Evidence limits
 

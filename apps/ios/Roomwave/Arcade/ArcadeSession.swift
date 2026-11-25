@@ -260,11 +260,13 @@ final class ArcadeSession: ObservableObject {
         guard isActive else { return }
         let now = link.timestamp
         let rawElapsed = now - (lastTimestamp ?? now)
-        guard rawElapsed.isFinite, rawElapsed >= 0, rawElapsed <= 0.5 else {
-            pause()
-            statusMessage = "The run paused after an interruption. Resume when you are ready."
+        guard rawElapsed.isFinite, rawElapsed >= 0 else {
+            lastTimestamp = now.isFinite ? now : nil
+            accumulator = 0
             return
         }
+        // Slow rendering must not masquerade as a lifecycle interruption. Drop
+        // excess simulation debt; scene-phase/audio interruptions pause explicitly.
         let elapsed = min(0.1, rawElapsed)
         lastTimestamp = now
         if screen == .home {

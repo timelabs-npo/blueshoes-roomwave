@@ -28,7 +28,7 @@ if not stopping and args.marker.exists():
         process = subprocess.Popen(["xcrun", "simctl", "io", args.simulator,
             "recordVideo", "--codec=h264", "--force", str(args.output)], stdout=log, stderr=log)
         try:
-            deadline = time.monotonic() + 180
+            deadline = time.monotonic() + 240
             while not stopping and process.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.2)
         finally:
@@ -38,4 +38,8 @@ if not stopping and args.marker.exists():
                     process.wait(timeout=8)
                 except subprocess.TimeoutExpired:
                     process.terminate()
-                    process.wait(timeout=3)
+                    try:
+                        process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=3)
