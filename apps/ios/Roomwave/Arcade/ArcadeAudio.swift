@@ -35,8 +35,10 @@ final class ArcadeAudio: NSObject {
 
     override init() {
         super.init()
-        NotificationCenter.default.addObserver(self, selector: #selector(interrupted(_:)),
-            name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(becameInactive(_:)),
+            name: AVAudioSession.didBecomeInactiveNotification, object: session)
+        NotificationCenter.default.addObserver(self, selector: #selector(resumptionRecommended(_:)),
+            name: AVAudioSession.resumptionRecommendationNotification, object: session)
         NotificationCenter.default.addObserver(self, selector: #selector(routeChanged(_:)),
             name: AVAudioSession.routeChangeNotification, object: nil)
     }
@@ -254,24 +256,32 @@ final class ArcadeAudio: NSObject {
         engine.pause()
     }
 
-    @objc nonisolated private func interrupted(_ note: Notification) {
-        guard let value = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt else { return }
-        let began = value == AVAudioSession.InterruptionType.began.rawValue
-        let ended = value == AVAudioSession.InterruptionType.ended.rawValue
-        guard began || ended else { return }
+    @objc nonisolated private func becameInactive(_ note: Notification) {
+        guard let context = note.userInfo?[AVAudioSession.deactivationContextKey]
+                as? AVAudioSession.DeactivationContext, context.source == .system else { return }
+        // Our own async deactivate emits source .app; its completion owns that transition.
+        // Muting sound must not masquerade as a system interruption and pause the game.
         Task { @MainActor [weak self] in
             guard let self else { return }
-            if began {
-                self.interruptionActive = true
-                // The system has interrupted the session. An in-flight completion still
-                // owns its transition and must reconcile the now-cancelled playback intent.
-                if self.sessionOperation == nil { self.sessionState = .inactive }
-                self.stop()
-                self.onInterruption?()
-            } else {
-                self.interruptionActive = false
-                // Never resume from an interruption-ended notification; require user intent.
-            }
+            self.interruptionActive = true
+            // An in-flight completion still owns its transition and must reconcile
+            // the now-cancelled playback intent.
+            if self.sessionOperation == nil { self.sessionState = .inactive }
+            self.stop()
+            self.onInterruption?()
+        }
+    }
+
+    @objc nonisolated private func resumptionRecommended(_ note: Notification) {
+        guard let context = note.userInfo?[AVAudioSession.resumptionContextKey]
+                as? AVAudioSession.ResumptionContext else { return }
+        switch context.recommendation {
+        case .shouldResume, .shouldNotResume:
+            // Both recommendations leave gameplay/audio paused. A later explicit Play
+            // or Resume may request activation; neither notification starts playback.
+            Task { @MainActor [weak self] in self?.interruptionActive = false }
+        @unknown default:
+            break
         }
     }
 
