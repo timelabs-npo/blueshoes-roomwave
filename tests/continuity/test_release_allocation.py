@@ -42,6 +42,12 @@ class ReleaseAllocationTests(unittest.TestCase):
         compiled = {"bundle": module.BUNDLE, "version": "0.3.0", "build": "1003.1",
                     "identity_verified": True, "usesNonExemptEncryption": False}
         (self.directory / "ipa-identity.json").write_text(json.dumps(compiled))
+        # Synthetic policy evidence only; no real signing claim is made by tests.
+        signature = {"app_id": module.APP, "bundle_identifier": module.BUNDLE,
+                     "version": "0.3.0", "build": "1003.1", "team_id": module.TEAM,
+                     "signature_verified": True, "distribution_profile_verified": True,
+                     "signer_certificate_sha256": "c" * 64, "ipa_sha256": module.digest(self.ipa)}
+        (self.directory / "exported-signature.json").write_text(json.dumps(signature))
         self.operator.record_export()
 
     def test_one_allocation_one_binary_one_consumption_then_observed_acceptance(self):
@@ -118,6 +124,15 @@ class ReleaseAllocationTests(unittest.TestCase):
             ("release-receipt.json", {"ipa_sha256": "0" * 64}),
             ("ipa-identity.json", {"build": "1004.1"}),
             ("ipa-identity.json", {"usesNonExemptEncryption": True}),
+            ("exported-signature.json", {"bundle_identifier": "org.example.other"}),
+            ("exported-signature.json", {"app_id": "111"}),
+            ("exported-signature.json", {"version": "0.2.0"}),
+            ("exported-signature.json", {"build": "1004.1"}),
+            ("exported-signature.json", {"team_id": "OTHERTEAM"}),
+            ("exported-signature.json", {"signature_verified": False}),
+            ("exported-signature.json", {"distribution_profile_verified": False}),
+            ("exported-signature.json", {"ipa_sha256": "0" * 64}),
+            ("exported-signature.json", {"signer_certificate_sha256": "invalid"}),
         ):
             with self.subTest(filename=filename, changes=changes):
                 path = self.directory / filename
@@ -127,6 +142,35 @@ class ReleaseAllocationTests(unittest.TestCase):
                     self.operator.prepare_upload()
                 path.write_bytes(original)
                 self.assertFalse((self.directory / "upload-intent.json").exists())
+
+    def test_missing_signature_evidence_blocks_export_and_upload(self):
+        self.exported()
+        signature_path = self.directory / "exported-signature.json"
+        signature_path.unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.operator.prepare_upload()
+        (self.directory / "release-receipt.json").unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.operator.record_export()
+        self.assertFalse((self.directory / "release-receipt.json").exists())
+
+    def test_changed_signature_receipt_after_export_or_intent_is_rejected(self):
+        self.exported()
+        path = self.directory / "exported-signature.json"
+        original = path.read_bytes()
+        signature = json.loads(original)
+        # Even another valid-shaped observation cannot replace preserved evidence.
+        signature["signer_certificate_sha256"] = "d" * 64
+        path.write_text(json.dumps(signature))
+        with self.assertRaises(module.Blocked):
+            self.operator.prepare_upload()
+        path.write_bytes(original)
+        intent = self.operator.prepare_upload()
+        self.assertEqual(intent["signature_receipt_sha256"], module.digest(path))
+        path.write_text(json.dumps(signature))
+        with self.assertRaises(module.Blocked):
+            self.operator.verify_upload(consume=True)
+        self.assertFalse((self.directory / "upload-consumed.json").exists())
 
     def test_missing_persisted_artifact_ids_block_consumption(self):
         self.exported()

@@ -31,6 +31,14 @@ final class ArcadeFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["creator.photo"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
         XCTAssertTrue(play.waitForExistence(timeout: 5))
+        app.buttons["arcade.x-currents"].tap()
+        XCTAssertTrue(app.segmentedControls["x.source"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["x.ride"].exists, "No activity course may be invented before a real read")
+        if app.staticTexts["x.unavailable"].exists {
+            XCTAssertFalse(app.buttons["x.connect"].isEnabled, "Missing X registration must not start pretend authentication")
+        }
+        app.buttons["Done"].tap()
+        XCTAssertTrue(play.waitForExistence(timeout: 5), "Optional X setup must not block the ordinary game")
         play.tap()
         XCTAssertTrue(app.buttons["arcade.pause"].waitForExistence(timeout: 10))
         let touch = app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.64))

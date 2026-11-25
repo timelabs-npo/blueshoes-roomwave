@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const APP = '6837899703';
 export const BUNDLE = 'org.timelabs.moleculefoundry';
 export const VERSION = '0.3.0';
-export const GROUP_NAME = 'Roomwave Public Beta';
+export const GROUP_NAME = 'Twitter Surfer Public Beta';
 export const CAP = 200;
 export const API_ORIGIN = 'https://api.appstoreconnect.apple.com';
 export const MARKETING_URL = 'https://github.com/timelabs-npo/blueshoes-roomwave';
@@ -21,9 +21,9 @@ const APPROVED_EXTERNAL = new Set(['BETA_APPROVED', 'IN_BETA_TESTING']);
 const ACTIONS = new Set(['preflight', 'stage', 'submit', 'enable-public-link']);
 
 export const DEFAULT_CONTENT = Object.freeze({
-  description: 'Roomwave is a one-touch kinetic surfing score-attack game. Hold to compress, release to launch, and hold in the air to dive. Ride sculpted neon courses, collect aerial rings, and build flow through clean landings. Learn three courses, improve your personal best, and share a result when you choose. This beta focuses on the arcade experience; photo and LiDAR creation are optional and do not block first play.',
-  whatsNew: '0.3.0 arcade rebuild. Please test hold/release/dive controls, the three courses, clean landings, shields, rings and combo scoring. Hold to compress, release to launch, hold in the air to dive, and release before touchdown for a clean landing. Check pause and background recovery, sound and haptics, saved personal bests, and player-initiated result sharing. Report unreadable hazards, unfair collisions, input problems or performance issues with your device and OS version. Scores come from gameplay; social engagement does not add points.',
-  reviewNotes: 'Roomwave is the arcade rebuild under the existing org.timelabs.moleculefoundry bundle. The core game is available as a guest without signing in. Choose a course and tap Play. Hold to compress, release to launch, and hold while airborne to dive. Release before touchdown for a clean landing. Pause, results, retry and local bests are part of the review flow. Photo/LiDAR creation is optional; no camera permission is needed for the core game. Sharing is initiated and confirmed by the player. No social account or purchases are required.',
+  description: 'Twitter Surfer is a one-touch kinetic surfing game. Hold to charge, release to soar, and hold in the air to dive. Ride three neon courses or shape a local route from a photo or LiDAR scan. When X access is configured, choose personal or community activity to shape a new current from public engagement observations. Each run freezes its course; points come from surfing skill. The core game works without an X account. This is an independent project and is not affiliated with X.',
+  whatsNew: '0.3.0 Twitter Surfer. Please test hold/release/dive controls, the three courses, clean landings, shields, rings and combo scoring. Hold to compress, release to launch, hold in the air to dive, and release before touchdown for a clean landing. Check pause and background recovery, sound and haptics, saved personal bests, and player-initiated result sharing. Report unreadable hazards, unfair collisions, input problems or performance issues with your device and OS version. Scores come from gameplay; social engagement does not add points. Check the Personal & community currents panel: unavailable X configuration must be clearly shown. Live X behavior requires the registered developer app and an authorized account.',
+  reviewNotes: 'Twitter Surfer is the arcade rebuild under the existing org.timelabs.moleculefoundry bundle. The core game is available as a guest without signing in. Choose a course and tap Play. Hold to compress, release to launch, and hold while airborne to dive. Release before touchdown for a clean landing. Pause, results, retry and local bests are part of the review flow. Photo/LiDAR creation is optional; no camera permission is needed for the core game. Sharing is initiated and confirmed by the player. No social account or purchases are required for guest play. Optional X integration reads public activity to shape the next course; it does not post automatically or grant points for engagement. If the X developer app is not configured, the connection is explicitly unavailable and must not be described as live.',
 });
 
 class Blocked extends Error {

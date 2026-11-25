@@ -37,6 +37,10 @@ jobs:
         env:
           ROOMWAVE_EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: test "$GITHUB_SHA" = "$ROOMWAVE_EXPECTED_SHA"
+      - name: Configure public X OAuth client
+        run: python3 scripts/release/configure-x.py
+        env:
+          X_OAUTH_CLIENT_ID: ${{ vars.X_OAUTH_CLIENT_ID }}
       - name: Select stable Xcode 27.2
         run: bash scripts/release/select-xcode.sh
       - name: Install project generator
@@ -100,6 +104,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
+      - name: Configure public X OAuth client
+        run: python3 scripts/release/configure-x.py
+        env:
+          X_OAUTH_CLIENT_ID: ${{ vars.X_OAUTH_CLIENT_ID }}
       - name: Select stable Xcode 27.2
         run: bash scripts/release/select-xcode.sh
       - name: Install project generator
@@ -140,6 +148,8 @@ jobs:
           path: |
             build/release/release-allocation.json
             build/release/ipa-identity.json
+            build/release/exported-signature.json
+            build/release/Roomwave-dSYMs.zip
             build/release/release-receipt.json
             build/release/export/*.ipa
       - name: Prepare exact binary upload intent
@@ -157,6 +167,8 @@ jobs:
             build/release/release-allocation.json
             build/release/upload-intent.json
             build/release/ipa-identity.json
+            build/release/exported-signature.json
+            build/release/Roomwave-dSYMs.zip
             build/release/release-receipt.json
             build/release/export/*.ipa
       - name: Consume preserved intent and observe Apple processing
@@ -180,3 +192,4 @@ jobs:
             build/release/*.json
             build/release/*.log
             build/release/testflight-operations/*.json
+            build/release/Roomwave-dSYMs.zip

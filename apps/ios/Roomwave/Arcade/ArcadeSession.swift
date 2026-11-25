@@ -3,6 +3,7 @@ import Combine
 import QuartzCore
 import UIKit
 import RoomwaveArcade
+import RoomwaveCreator
 
 @MainActor
 final class ArcadeSession: ObservableObject {
@@ -23,6 +24,7 @@ final class ArcadeSession: ObservableObject {
     private let profile = ArcadeProfile()
     private let audio = ArcadeAudio()
     private var compiled: [String: CompiledSurfCourse] = [:]
+    private var viralBaseCourse: CompiledSurfCourse?
     private(set) var course: CompiledSurfCourse?
     private(set) var state: SurfState?
     private(set) var inputs: [SurfInput] = []
@@ -152,7 +154,25 @@ final class ArcadeSession: ObservableObject {
         // Retain one local creation alongside the authored catalog, never raw input.
         compiled = compiled.filter { ArcadeProfile.courseIDs.contains($0.key) }
         compiled[next.definition.id] = next
+        viralBaseCourse = nil
         requestCourse(next.definition.id)
+    }
+
+    /// Social observations select the next immutable course. They never mutate
+    /// an active run, grant points, or repeatedly deform a previous social course.
+    func useViralCurrent(_ current: ViralCurrent) {
+        guard screen != .playing, let selected = course else { return }
+        let social = selected.definition.source == .xInspired || selected.definition.source == .xLidarInspired
+        let base = social ? (viralBaseCourse ?? selected) : selected
+        do {
+            let next = try ViralCourseFactory.make(base: base, current: current)
+            viralBaseCourse = base
+            compiled = compiled.filter { ArcadeProfile.courseIDs.contains($0.key) }
+            compiled[next.definition.id] = next
+            requestCourse(next.definition.id)
+        } catch {
+            statusMessage = "Could not shape this current. Refresh X activity and try again."
+        }
     }
 
     private func requestCourse(_ id: String) {

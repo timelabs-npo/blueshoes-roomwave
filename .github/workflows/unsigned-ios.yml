@@ -46,6 +46,10 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Configure public X OAuth client
+        run: python3 scripts/release/configure-x.py
+        env:
+          X_OAUTH_CLIENT_ID: ${{ vars.X_OAUTH_CLIENT_ID }}
       - name: Select stable Xcode 27.2
         run: bash scripts/release/select-xcode.sh
       - name: Install project generator if needed

@@ -3,7 +3,9 @@ import Foundation
 // Arcade v3 contract. Course distance is a game-space longitudinal coordinate,
 // not a calibrated measurement of a photographed or scanned room.
 public enum SurfBiome: String, Codable, CaseIterable, Sendable { case dawn, orbit, midnight }
-public enum SurfSource: String, Codable, Sendable { case authored, daily, photoInspired, lidarInspired }
+public enum SurfSource: String, Codable, Sendable {
+    case authored, daily, photoInspired, lidarInspired, xInspired, xLidarInspired
+}
 public enum SurfPhase: String, Codable, Sendable { case running, finished, crashed }
 public enum SurfEncounterKind: String, Codable, Sendable { case ring, barrier, ceiling, boost }
 public enum SurfMedal: String, Codable, Sendable { case none, bronze, silver, gold }

@@ -58,6 +58,9 @@ final class ArcadeSceneController: ArcadeSceneDriving {
 
     init() {
         arView = ARView(frame: .zero, cameraMode: .nonAR, automaticallyConfigureSession: false)
+        // The rider uses the authored contact patch below. Automatic grounding
+        // shadows duplicate that cue and add an unnecessary rendering pass.
+        arView.renderOptions.insert(.disableGroundingShadows)
         arView.environment.background = .color(ArcadeGeometry.rgb(0.018, 0.025, 0.06))
         arView.environment.lighting.intensityExponent = 0.7
         // The portrait FOV is explicit, avoiding aspect-dependent horizontal framing.

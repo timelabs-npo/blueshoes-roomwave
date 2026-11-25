@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "status": "prepared_not_registered",
+  "proposed_app_name": "Twitter Surfer",
+  "description": "An independent, unofficial iOS surfing game. With the player's authorization, read-only personal X activity and recent public community posts shape a course's terrain, rings and boosts. Optional local LiDAR room geometry can be combined with the same activity snapshot. Scores come from playing the course. No affiliation with or endorsement by X is claimed.",
+  "website_url": "https://github.com/timelabs-npo/blueshoes-roomwave",
+  "privacy_policy_url": "https://github.com/timelabs-npo/blueshoes-roomwave/blob/main/docs/PRIVACY.md",
+  "registration": {
+    "application_type": "Native App",
+    "client_type": "public",
+    "app_permissions": "Read",
+    "oauth_2_enabled": true,
+    "grant_types": [
+      "authorization_code",
+      "refresh_token"
+    ],
+    "pkce_method": "S256",
+    "callback_urls": [
+      "twitter-surfer://oauth/callback"
+    ],
+    "scopes": [
+      "tweet.read",
+      "users.read",
+      "offline.access"
+    ]
+  },
+  "public_configuration": {
+    "github_repository_variable": "X_OAUTH_CLIENT_ID",
+    "ios_info_plist_key": "XOAuthClientID",
+    "client_id_status": "not_issued"
+  },
+  "endpoints": {
+    "authorization": "https://x.com/i/oauth2/authorize",
+    "token": "https://api.x.com/2/oauth2/token",
+    "authenticated_user": "https://api.x.com/2/users/me",
+    "personal_posts_template": "https://api.x.com/2/users/{authenticated_user_id}/tweets",
+    "community_recent_search": "https://api.x.com/2/tweets/search/recent"
+  },
+  "first_beta": {
+    "activity_sources": [
+      "authorized_personal_account",
+      "recent_public_community_posts"
+    ],
+    "default_community_query": "#TwitterSurfer OR #Roomwave",
+    "requested_post_fields": [
+      "public_metrics"
+    ],
+    "refresh": "player_initiated_snapshots",
+    "webhook_status": "not_configured",
+    "velocity_requires": "two_observations_at_least_15_seconds_apart",
+    "course_activity": "frozen_for_each_run",
+    "score_source": "gameplay_skill"
+  },
+  "owner_actions_required": [
+    "Create the developer app under the owner's approved X developer project.",
+    "Review the proposed name and unofficial description against current X branding requirements.",
+    "Verify the website and privacy policy are reachable and describe the shipped integration before registering.",
+    "Enable Native App OAuth 2.0 and register the callback exactly as listed.",
+    "Confirm access and credit availability for the personal-posts and recent-search endpoints in the X Developer Console.",
+    "Set the issued public client ID as repository variable X_OAUTH_CLIENT_ID and verify it reaches the compiled XOAuthClientID setting.",
+    "Complete an authorized sign-in, manual personal/community refresh, disconnect and error-handling check on the built app."
+  ],
+  "evidence": {
+    "developer_app_created": false,
+    "client_id_configured": false,
+    "live_api_tested": false,
+    "current_native_release_passed": false,
+    "public_testflight_release_observed": false
+  }
+}
