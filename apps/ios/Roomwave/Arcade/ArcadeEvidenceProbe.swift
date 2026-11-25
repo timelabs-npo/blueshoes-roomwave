@@ -12,6 +12,7 @@ enum ArcadeEvidenceProbe {
     private static var initialized = false
     private static var pending = Set<String>()
     private static var captured = Set<String>()
+    private static var nextCaptureAttempt: [String: TimeInterval] = [:]
     private static var latestTick = 0
     private static var latestCourse = ""
     private static var latestScreen: ArcadeScreen?
@@ -55,7 +56,9 @@ enum ArcadeEvidenceProbe {
             else if state.tick >= 60 { mode = "running" }
         }
         lastGrounded = state.grounded
+        let now = ProcessInfo.processInfo.systemUptime
         guard let mode, !captured.contains(mode), !pending.contains(mode),
+              now >= nextCaptureAttempt[mode, default: 0],
               let arView = findARView(view), arView.window != nil else { return }
         let entities = arView.scene.anchors.flatMap { hierarchy($0) }
         let layers = ["Skin", "Coat", "SkeletonOverlay", "MuscleOverlay"].filter { name in
@@ -64,6 +67,7 @@ enum ArcadeEvidenceProbe {
         let fallback = entities.contains { $0.name == "ProceduralFallback_NotBundledAvatar" }
         guard layers.count == 4, !fallback else { return }
         pending.insert(mode)
+        nextCaptureAttempt[mode] = now + 0.5
         let requestTick = state.tick
         let courseID = course.definition.id
         let footY = state.height
@@ -73,16 +77,18 @@ enum ArcadeEvidenceProbe {
             let png = image?.pngData()
             let width = image?.size.width ?? 0
             let height = image?.size.height ?? 0
+            let pixelRange = image?.cgImage.map { sampledPixelRange($0) } ?? 0
             Task { @MainActor in
                 pending.remove(mode)
                 guard generation == requestGeneration, latestScreen == screen,
                       latestCourse == courseID, latestTick >= requestTick,
-                      let png, width >= 100, height >= 100 else { return }
+                      let png, width >= 100, height >= 100, pixelRange >= 24 else { return }
                 let filename = mode + ".png"
                 do {
                     try png.write(to: directory.appendingPathComponent(filename), options: .atomic)
                     let receipt: [String: Any] = [
-                        "schema_version": 3, "mode": mode,
+                        "schema_version": 4, "mode": mode,
+                        "sampled_rgb_range": pixelRange,
                         "pid": ProcessInfo.processInfo.processIdentifier,
                         "bundle": Bundle.main.bundleIdentifier ?? "",
                         "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
@@ -101,6 +107,34 @@ enum ArcadeEvidenceProbe {
                 } catch { print("ARCADE_EVIDENCE_WRITE_ERROR: \(error)") }
             }
         }
+    }
+
+    // RealityKit may return its uniform clear colour before the first drawable.
+    // Sample actual pixels; entity presence alone does not prove a rendered scene.
+    nonisolated private static func sampledPixelRange(_ image: CGImage) -> Int {
+        let width = 16, height = 32
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress,
+                                          width: width, height: height,
+                                          bitsPerComponent: 8, bytesPerRow: width * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue |
+                                            CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.interpolationQuality = .low
+            context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+            return true
+        }
+        guard drawn else { return 0 }
+        var minima = [255, 255, 255], maxima = [0, 0, 0]
+        for offset in stride(from: 0, to: pixels.count, by: 4) {
+            for channel in 0..<3 {
+                let value = Int(pixels[offset + channel])
+                minima[channel] = min(minima[channel], value)
+                maxima[channel] = max(maxima[channel], value)
+            }
+        }
+        return (0..<3).map { maxima[$0] - minima[$0] }.max() ?? 0
     }
 
     private static func writeJSON(_ value: Any, named: String) {

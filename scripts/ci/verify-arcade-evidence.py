@@ -20,6 +20,8 @@ for mode in expected:
     assert isinstance(receipt["run_generation"], int) and receipt["run_generation"] > 0
     assert receipt["capture_tick"] >= receipt["request_tick"] >= 0
     assert receipt["actual_arview_snapshot"] is True
+    assert receipt["schema_version"] == 4
+    assert type(receipt["sampled_rgb_range"]) is int and 24 <= receipt["sampled_rgb_range"] <= 255
     assert receipt["fallback_present"] is False
     assert set(receipt["renderable_layers"]) == {"Skin", "Coat", "SkeletonOverlay", "MuscleOverlay"}
     assert receipt["human_playtest"] is False
