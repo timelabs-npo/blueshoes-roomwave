@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "prepared_not_registered",
+  "status": "public_client_configured_live_validation_pending",
   "proposed_app_name": "Twitter Surfer",
   "description": "An independent, unofficial iOS surfing game. With the player's authorization, read-only personal X activity and recent public community posts shape a course's terrain, rings and boosts. Optional local LiDAR room geometry can be combined with the same activity snapshot. Scores come from playing the course. No affiliation with or endorsement by X is claimed.",
   "website_url": "https://github.com/timelabs-npo/blueshoes-roomwave",
@@ -27,7 +27,8 @@
   "public_configuration": {
     "github_repository_variable": "X_OAUTH_CLIENT_ID",
     "ios_info_plist_key": "XOAuthClientID",
-    "client_id_status": "not_issued"
+    "client_id_status": "owner_supplied_public_id_configured_in_source",
+    "repository_variable_write": "403_integration_permission; public source setting used"
   },
   "endpoints": {
     "authorization": "https://x.com/i/oauth2/authorize",
@@ -52,19 +53,18 @@
     "score_source": "gameplay_skill"
   },
   "owner_actions_required": [
-    "Create the developer app under the owner's approved X developer project.",
     "Review the proposed name and unofficial description against current X branding requirements.",
     "Verify the website and privacy policy are reachable and describe the shipped integration before registering.",
     "Enable Native App OAuth 2.0 and register the callback exactly as listed.",
     "Confirm access and credit availability for the personal-posts and recent-search endpoints in the X Developer Console.",
-    "Set the issued public client ID as repository variable X_OAUTH_CLIENT_ID and verify it reaches the compiled XOAuthClientID setting.",
     "Complete an authorized sign-in, manual personal/community refresh, disconnect and error-handling check on the built app."
   ],
   "evidence": {
-    "developer_app_created": false,
-    "client_id_configured": false,
+    "developer_app_created": true,
+    "client_id_configured": true,
     "live_api_tested": false,
     "current_native_release_passed": false,
     "public_testflight_release_observed": false
-  }
+  },
+  "registered_app_name": "xsurf"
 }

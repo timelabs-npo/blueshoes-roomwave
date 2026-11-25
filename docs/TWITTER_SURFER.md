@@ -2,13 +2,13 @@
 
 Twitter Surfer is the intended iOS game in [timelabs-npo/blueshoes-roomwave](https://github.com/timelabs-npo/blueshoes-roomwave). Personal and community X activity should change the course a player rides. Optional, locally captured LiDAR room geometry provides another course input. Scores come from timing, movement and clean execution on that course.
 
-The public registration draft is [X_APP_REGISTRATION.json](X_APP_REGISTRATION.json). **No X developer app has been registered, no client ID has been issued or configured, and no live X API integration has been tested.** This document defines the integration and owner setup; it does not establish a working connection or a public TestFlight release. The proposed name is an independent project name, with no claim of affiliation with or endorsement by X. The owner must review current naming and branding requirements before registration and release.
+The public registration draft is [X_APP_REGISTRATION.json](X_APP_REGISTRATION.json). **The owner created X app `xsurf`, and its public OAuth 2.0 Client ID is configured. No live X authentication or API read has been verified yet.** This document defines the integration and owner setup; it does not establish a working connection or a public TestFlight release. The proposed name is an independent project name, with no claim of affiliation with or endorsement by X. The owner must review current naming and branding requirements before registration and release.
 
 ## First-beta behavior
 
 The player can connect their own X account and manually refresh two sources: that account's posts and recent public community posts matching `#TwitterSurfer OR #Roomwave`. This is public recent search, not a claim to access every X Community, a complete historical feed, or the algorithmic For You timeline. There is no webhook or background event subscription in the first beta.
 
-The integration requests timestamps and public engagement metrics. An activity snapshot supplies bounded energy and conversation parameters. Velocity requires two real observations at least 15 seconds apart; one observation cannot establish a growth rate. A missing metric or unavailable request is unavailable data, not an invented engagement event. Duplicate posts and repeated observations must not create duplicate inputs.
+The integration timestamps each observation locally and requests public engagement metrics. An activity snapshot supplies bounded energy and conversation parameters. Velocity requires two real observations at least 15 seconds apart; one observation cannot establish a growth rate. A missing metric or unavailable request is unavailable data, not an invented engagement event. Duplicate posts and repeated observations must not create duplicate inputs.
 
 The source adapters `.xInspired` and `.xLidarInspired` distinguish an activity-shaped course from a course combining activity with the player's prior custom LiDAR course. Activity sculpts terrain, ring placement and boosts. The snapshot and resulting course freeze before the run starts, so a network refresh cannot move an obstacle during a run. Likes, reposts and follower totals never add score or substitute for player skill. Ordinary offline courses remain available when sign-in, network access, API credits or hardware are unavailable.
 
@@ -16,7 +16,7 @@ LiDAR is a separate, optional local input. It requires supported hardware and ca
 
 ## Register the X application
 
-These steps are for the owner in the [X Developer Console](https://console.x.com/). The JSON is a reviewable settings draft, not an executed registration or a provider-native import file.
+These steps are for the owner in the [X Developer Console](https://console.x.com/). The JSON records the reviewed settings and the current unverified integration state; it is not a provider-native import file. The owner has created `xsurf` and supplied its public OAuth 2.0 Client ID. GitHub denied repository-variable writes to this integration (HTTP 403), so the public value is checked into the app Info.plist. No consumer secret or app bearer token is included. The workflow can still override the public ID with an owner-managed repository variable.
 
 1. Create the developer application under the owner's approved project. Use the proposed name **Twitter Surfer** only after reviewing current branding requirements. The description should identify it as an independent, unofficial iOS surfing game using read-only authorized activity.
 2. Set the website to `https://github.com/timelabs-npo/blueshoes-roomwave` and privacy policy to `https://github.com/timelabs-npo/blueshoes-roomwave/blob/main/docs/PRIVACY.md`. Check both public pages after the changes reach `main`; the privacy policy must describe the actual sign-in, token storage, fetched activity, local processing and disconnect behavior before external testing.

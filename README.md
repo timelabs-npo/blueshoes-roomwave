@@ -4,7 +4,7 @@
 
 Twitter Surfer is a native one-touch kinetic surfing arcade in a low-poly neon landscape. Timing changes your flight arc, momentum and score. The v0.3 rebuild replaces the original flat steering workbench with a full-screen game.
 
-Personal and community X activity can shape the next current and combine with local LiDAR terrain. OAuth uses a native public client and device-only Keychain storage. An X developer app has not been registered yet: live activity remains visibly unavailable until its public client ID is configured. The ordinary game needs no social account. See [X integration and release status](docs/TWITTER_SURFER.md) and [prepared registration settings](docs/X_APP_REGISTRATION.json).
+Personal and community X activity can shape the next current and combine with local LiDAR terrain. OAuth uses a native public client and device-only Keychain storage. The owner-created X app `xsurf` now has its public client ID configured. Real sign-in and API entitlement still require validation on the built app. The ordinary game needs no social account. See [X integration and release status](docs/TWITTER_SURFER.md) and [prepared registration settings](docs/X_APP_REGISTRATION.json).
 
 ## The arcade
 
