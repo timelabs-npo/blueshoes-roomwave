@@ -5,7 +5,7 @@ on:
   pull_request:
     paths:
       - 'scripts/continuity/**'
-      - 'scripts/ci/run-bounded.py'
+      - 'scripts/ci/**'
       - 'tests/ci/**'
       - 'tests/continuity/**'
       - 'scripts/release/public-beta.mjs'

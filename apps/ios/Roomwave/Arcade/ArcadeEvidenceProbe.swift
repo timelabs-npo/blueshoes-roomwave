@@ -10,6 +10,14 @@ import RoomwaveArcade
 enum ArcadeEvidenceProbe {
     static let requested = ProcessInfo.processInfo.arguments.contains("--arcade-evidence")
     private static var initialized = false
+    private static var diagnostics: [String: Any] = [:]
+    private static var lastHeartbeatTime: TimeInterval = -.infinity
+    private static let timestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
     private static var pending = Set<String>()
     private static var captured = Set<String>()
     private static var nextCaptureAttempt: [String: TimeInterval] = [:]
@@ -23,13 +31,11 @@ enum ArcadeEvidenceProbe {
         .appendingPathComponent("RoomwaveArcadeCaptures", isDirectory: true)
 
     static func observe(state: SurfState?, course: CompiledSurfCourse?, screen: ArcadeScreen,
-                        events: [SurfEvent], view: UIView) {
-        guard requested, let course, let state else { return }
-        if !initialized {
-            initialized = true
-            try? FileManager.default.removeItem(at: directory)
-            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        }
+                        events: [SurfEvent], view: UIView, isLoading: Bool, isActive: Bool) {
+        guard requested else { return }
+        initializeIfNeeded()
+        updateContext(screen: screen, tick: state?.tick ?? 0, isLoading: isLoading, isActive: isActive)
+        guard let course, let state else { return }
         if course.definition.id != latestCourse || state.tick < latestTick ||
             (screen == .playing && latestScreen == .home) { generation &+= 1 }
         latestScreen = screen
@@ -73,40 +79,113 @@ enum ArcadeEvidenceProbe {
         let footY = state.height
         let roadY = course.pose(at: state.distance).center.y
         let requestGeneration = generation
-        arView.snapshot(saveToHDR: false) { image in
-            let png = image?.pngData()
-            let width = image?.size.width ?? 0
-            let height = image?.size.height ?? 0
-            let pixelRange = image?.cgImage.map { sampledPixelRange($0) } ?? 0
-            Task { @MainActor in
+        // End the CADisplayLink callback before asking RealityKit to capture.
+        // Recheck ownership because course/screen changes may precede this turn.
+        DispatchQueue.main.async { [weak arView] in
+            guard generation == requestGeneration, latestScreen == screen,
+                  latestCourse == courseID, latestTick >= requestTick,
+                  pending.contains(mode), let arView, arView.window != nil else {
                 pending.remove(mode)
-                guard generation == requestGeneration, latestScreen == screen,
-                      latestCourse == courseID, latestTick >= requestTick,
-                      let png, width >= 100, height >= 100, pixelRange >= 24 else { return }
-                let filename = mode + ".png"
-                do {
-                    try png.write(to: directory.appendingPathComponent(filename), options: .atomic)
-                    let receipt: [String: Any] = [
-                        "schema_version": 4, "mode": mode,
-                        "sampled_rgb_range": pixelRange,
-                        "pid": ProcessInfo.processInfo.processIdentifier,
-                        "bundle": Bundle.main.bundleIdentifier ?? "",
-                        "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
-                        "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
-                        "course_id": courseID, "run_generation": requestGeneration,
-                        "request_tick": requestTick, "capture_tick": latestTick,
-                        "grounded_at_request": state.grounded, "foot_y_at_request": footY,
-                        "road_y_at_request": roadY, "score_at_request": state.score,
-                        "image_filename": filename, "renderable_layers": layers,
-                        "fallback_present": false, "actual_arview_snapshot": true,
-                        "width": width, "height": height,
-                        "human_playtest": false
-                    ]
-                    writeJSON(receipt, named: mode + ".json")
-                    captured.insert(mode)
-                } catch { print("ARCADE_EVIDENCE_WRITE_ERROR: \(error)") }
+                return
+            }
+            recordStage("snapshot_request")
+            arView.snapshot(saveToHDR: false) { image in
+                let width = image?.cgImage?.width ?? 0
+                let height = image?.cgImage?.height ?? 0
+                let pixelRange = image?.cgImage.map { sampledPixelRange($0) } ?? 0
+                // Reject blank/invalid pixels before expensive PNG encoding.
+                // Only Data and integer image observations cross into MainActor.
+                let png = width >= 100 && height >= 100 && pixelRange >= 24 ? image?.pngData() : nil
+                Task { @MainActor in
+                    recordStage("snapshot_callback")
+                    pending.remove(mode)
+                    guard generation == requestGeneration, latestScreen == screen,
+                          latestCourse == courseID, latestTick >= requestTick,
+                          let png, width >= 100, height >= 100, pixelRange >= 24 else { return }
+                    let filename = mode + ".png"
+                    do {
+                        try png.write(to: directory.appendingPathComponent(filename), options: .atomic)
+                        let receipt: [String: Any] = [
+                            "schema_version": 4, "mode": mode,
+                            "sampled_rgb_range": pixelRange,
+                            "pid": ProcessInfo.processInfo.processIdentifier,
+                            "bundle": Bundle.main.bundleIdentifier ?? "",
+                            "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+                            "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+                            "course_id": courseID, "run_generation": requestGeneration,
+                            "request_tick": requestTick, "capture_tick": latestTick,
+                            "grounded_at_request": state.grounded, "foot_y_at_request": footY,
+                            "road_y_at_request": roadY, "score_at_request": state.score,
+                            "image_filename": filename, "renderable_layers": layers,
+                            "fallback_present": false, "actual_arview_snapshot": true,
+                            "width": width, "height": height,
+                            "human_playtest": false
+                        ]
+                        writeJSON(receipt, named: mode + ".json")
+                        captured.insert(mode)
+                        recordStage("snapshot_accepted")
+                    } catch { print("ARCADE_EVIDENCE_WRITE_ERROR: \(error)") }
+                }
             }
         }
+    }
+
+    static func trace(_ stage: String, screen: ArcadeScreen, tick: Int,
+                      isLoading: Bool, isActive: Bool) {
+        guard requested else { return }
+        initializeIfNeeded()
+        updateContext(screen: screen, tick: tick, isLoading: isLoading, isActive: isActive)
+        recordStage(stage)
+    }
+
+    static func heartbeat(screen: ArcadeScreen, tick: Int, isLoading: Bool, isActive: Bool) {
+        guard requested else { return }
+        initializeIfNeeded()
+        updateContext(screen: screen, tick: tick, isLoading: isLoading, isActive: isActive)
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastHeartbeatTime >= 1 else { return }
+        lastHeartbeatTime = now
+        let timestamp = timestampFormatter.string(from: Date())
+        diagnostics["heartbeat_at"] = timestamp
+        diagnostics["updated_at"] = timestamp
+        // Heartbeats preserve the latest meaningful stage.
+        writeJSON(diagnostics, named: "diagnostics.json")
+    }
+
+    private static func initializeIfNeeded() {
+        guard !initialized else { return }
+        initialized = true
+        try? FileManager.default.removeItem(at: directory)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let timestamp = timestampFormatter.string(from: Date())
+        diagnostics = [
+            "schema_version": 1,
+            "bundle": Bundle.main.bundleIdentifier ?? "",
+            "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+            "pid": ProcessInfo.processInfo.processIdentifier,
+            "launch_id": UUID().uuidString,
+            "started_at": timestamp, "updated_at": timestamp,
+            "stage": "initializing", "heartbeat_at": NSNull(),
+            "screen": "home", "tick": 0, "is_loading": false, "is_active": false,
+            "stages": [[String: String]]()
+        ]
+    }
+
+    private static func updateContext(screen: ArcadeScreen, tick: Int, isLoading: Bool, isActive: Bool) {
+        diagnostics["screen"] = String(describing: screen)
+        diagnostics["tick"] = tick
+        diagnostics["is_loading"] = isLoading
+        diagnostics["is_active"] = isActive
+    }
+
+    private static func recordStage(_ name: String) {
+        let timestamp = timestampFormatter.string(from: Date())
+        let previous = diagnostics["stages"] as? [[String: String]] ?? []
+        diagnostics["stages"] = Array(previous.suffix(31)) + [["name": name, "at": timestamp]]
+        diagnostics["stage"] = name
+        diagnostics["updated_at"] = timestamp
+        writeJSON(diagnostics, named: "diagnostics.json")
     }
 
     // RealityKit may return its uniform clear colour before the first drawable.

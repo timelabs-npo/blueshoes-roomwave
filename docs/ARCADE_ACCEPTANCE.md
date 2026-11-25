@@ -38,6 +38,26 @@ Its artifact `15061539312` has verified ZIP SHA-256 `c1ac501a11d46a0a8a6124a2948
 
 The focused correction captures XCTest attachments with `XCUIScreen.main.screenshot()` while retaining every actual tap and assertion. DEBUG render observations now reject uniform clear frames using a small actual RGB-pixel sample and retry at most twice per second per mode. Schema 4 receipts include that sampled range, and the evidence verifier requires it. These changes do not alter the Release game. They require a new successful ordinary-input/native-render run; neither the screenshot correction nor a visible Home frame alone proves gameplay responsiveness.
 
+### Second failure and the next diagnostic gate
+
+Source `ad02eb8c30032b7eab97d405665399e2305ecfcb` passed continuity [45701085602](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45701085602) and CodeQL [45701074990](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45701074990). Native [45701085647](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45701085647) **FAILED** at `waitForEnabled(arcade.play)`, before its first screenshot. All 43 package tests and six hosted tests passed; the ordinary gameplay flow and archive did not complete. Artifact `15064237959` has verified ZIP SHA-256 `d4cfa83ad9009d478a6c5547f1a5c11478ba170507f09240f5b828aa40aa98c9`. The checked-out PR merge `f30574ed6bbbf19802a2c05348e98f910169ec51` has the same source tree as `ad02eb8`.
+
+Decoded actual UI-test recordings show a rendered art-pass Home after loading: at 25 seconds in the `ad02eb8` recording, and at 130 seconds in the `390cb5f` recording. The later sampled `ad02eb8` frame is identical. These frames establish that the new scene can render; they neither establish responsive input nor prove a freeze. No sampled frame reaches gameplay. The screenshot API correction was not exercised by the second failed test.
+
+All three inspected native runs used Xcode 27.2 with the iOS 27.0 simulator even though an iOS 27.2 iPhone 18 Pro Max was installed. They used different hosted worker IDs, so cancellation residue on one shared live host is not established. The next gate selects the exact requested model on the actual SDK major/minor, records the runtime and runner identity, and refuses an older-runtime fallback.
+
+For this next gate only, DEBUG evidence requests are deferred beyond the display-link callback, and pixel contrast is checked before PNG encoding. A bounded trace records bootstrap phases and at most one heartbeat per second. An observer refreshes the actual app/data containers, verifies the exact current evidence process before sampling, and collects at most two process samples when startup or heartbeat observations stop advancing. Staleness is evidence to inspect, not an automatic hang diagnosis. The pipeline publishes a lightweight review artifact as well as the complete native evidence. Actual gameplay assertions, render receipt requirements, release configuration, and unsigned archive gates remain required. No successful native result is recorded for this pending correction.
+
+### Renewed independent Codex review
+
+Three new real Codex CLI sessions started on Wd on 26 November at 01:04 Moscow time, each from the exact published `ad02eb8` baseline, in separate worktrees with a 20-minute deadline and read-only review instructions. Their launch receipts and event logs are recorded by the coordinator; launch alone is not a completed or accepted review.
+
+| Review | Session |
+| --- | --- |
+| Native startup and evidence | `01a214bc-c141-7b52-bc5d-2b2318a970ec` |
+| Gameplay and beta usability | `01a214bc-c165-7352-ace9-17d8558e6d6e` |
+| Public TestFlight continuity | `01a214bc-c11c-72f3-8f03-9466fb85059f` |
+
 ## Human and device gates still open
 
 Observe at least a few first-time players without spoken coaching. Record device/build, time to first meaningful input, whether the charge/release/dive/landing relationship is understood, whether collision causes are readable, and whether players voluntarily retry. Keep actual observations and disagreements; do not convert an automated survival trace into a PASS.

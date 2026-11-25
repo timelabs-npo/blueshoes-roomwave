@@ -63,7 +63,15 @@ final class ArcadeSession: ObservableObject {
         guard !isLoading, course == nil else { return }
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        #if DEBUG
+        traceEvidence("bootstrap_enter")
+        #endif
+        defer {
+            isLoading = false
+            #if DEBUG
+            traceEvidence("bootstrap_finished")
+            #endif
+        }
         if !profileLoaded {
             profile.load(); profileLoaded = true
             preferences = profile.preferences
@@ -71,7 +79,13 @@ final class ArcadeSession: ObservableObject {
             inputs.reserveCapacity(rules.maximumTicks)
             frameEvents.reserveCapacity(32)
             audio.onInterruption = { [weak self] in self?.pause() }
+            #if DEBUG
+            traceEvidence("audio_prepare_begin")
+            #endif
             await audio.prepare()
+            #if DEBUG
+            traceEvidence("audio_prepare_end")
+            #endif
             statusMessage = profile.notice ?? audio.notice
         }
         do {
@@ -84,6 +98,9 @@ final class ArcadeSession: ObservableObject {
                     courses[id] = try SurfCourseCompiler.compile(definition)
                 }
                 compiled = courses
+                #if DEBUG
+                traceEvidence("course_compile_end")
+                #endif
             }
             if pendingCourseID == nil { pendingCourseID = selectedID }
             try await loadPendingCourses()
@@ -152,15 +169,29 @@ final class ArcadeSession: ObservableObject {
             guard let next = compiled[id] else { throw SessionError.missingCourse(id) }
             course = nil
             state = nil
+            #if DEBUG
+            traceEvidence("scene_load_begin")
+            #endif
             try await scene.load(course: next)
+            #if DEBUG
+            traceEvidence("scene_load_end")
+            #endif
             selectedID = id
             course = next
             state = SurfSimulation.start(course: next, rules: rules)
             selectedBest = profile.bests[id]
             previewTime = 0
+            #if DEBUG
+            traceEvidence("state_published")
+            #endif
             scene.preview(time: 0, reducedMotion: reducedMotion)
         }
-        if isActive { startClock(preview: true) }
+        if isActive {
+            startClock(preview: true)
+            #if DEBUG
+            traceEvidence("clock_started")
+            #endif
+        }
     }
 
     func play() {
@@ -257,6 +288,11 @@ final class ArcadeSession: ObservableObject {
     }
 
     fileprivate func frame(_ link: CADisplayLink) {
+        #if DEBUG
+        // Persist liveness before any preview/render/snapshot work can block.
+        ArcadeEvidenceProbe.heartbeat(screen: screen, tick: state?.tick ?? 0,
+                                      isLoading: isLoading, isActive: isActive)
+        #endif
         guard isActive else { return }
         let now = link.timestamp
         let rawElapsed = now - (lastTimestamp ?? now)
@@ -342,9 +378,17 @@ final class ArcadeSession: ObservableObject {
 
     private func observeEvidence(events: [SurfEvent] = []) {
         #if DEBUG
-        ArcadeEvidenceProbe.observe(state: state, course: course, screen: screen, events: events, view: scene.view)
+        ArcadeEvidenceProbe.observe(state: state, course: course, screen: screen, events: events,
+                                    view: scene.view, isLoading: isLoading, isActive: isActive)
         #endif
     }
+
+    #if DEBUG
+    private func traceEvidence(_ stage: String) {
+        ArcadeEvidenceProbe.trace(stage, screen: screen, tick: state?.tick ?? 0,
+                                  isLoading: isLoading, isActive: isActive)
+    }
+    #endif
 
     private func publishHUD(now: Double) {
         guard let state else { return }

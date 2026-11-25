@@ -44,6 +44,26 @@ jobs:
       - name: Test core, actual touch flow, native render and unsigned archive
         timeout-minutes: 38
         run: bash scripts/release/validate-native.sh
+      - name: Preserve lightweight native review evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: roomwave-native-review
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/release/evidence/*.json
+            build/release/evidence/*.png
+            build/release/evidence/*.txt
+            build/release/evidence/ui-attachments/*.json
+            build/release/evidence/ui-attachments/*.png
+            build/release/evidence/ui-attachments/*.txt
+            build/release/evidence/live-diagnostics
+            build/release/*identity.json
+            build/release/simulator-selection.json
+            build/release/native-test.log
+            build/release/diagnostic-observer.log
+            build/release/recording-observer.log
       - name: Preserve playable evidence and unsigned simulator app
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

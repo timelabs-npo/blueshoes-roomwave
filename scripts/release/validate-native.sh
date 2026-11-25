@@ -16,18 +16,21 @@ PY
 python3 scripts/ci/run-bounded.py --seconds 300 --label core-tests -- swift test --parallel
 xcodegen generate --spec apps/ios/project.yml --project apps/ios
 xcrun simctl list devices available --json > build/release/simulators.json
-ROOMWAVE_SIMULATOR_ID=$(python3 - <<'PY'
-import json
+xcrun simctl list runtimes --json > build/release/simulator-runtimes.json
+ROOMWAVE_SIMULATOR_SDK="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+ROOMWAVE_SIMULATOR_ID=$(python3 scripts/ci/select-simulator.py \
+  --devices build/release/simulators.json --runtimes build/release/simulator-runtimes.json \
+  --sdk-version "$ROOMWAVE_SIMULATOR_SDK" --model "iPhone 18 Pro Max" \
+  --receipt build/release/simulator-selection.json)
+python3 - <<'PY'
+import json, os, platform
 from pathlib import Path
-items=[]
-for runtime,devices in json.loads(Path('build/release/simulators.json').read_text())['devices'].items():
-    if 'iOS-27' in runtime:
-        items.extend(d for d in devices if d.get('isAvailable') and d.get('name','').startswith('iPhone'))
-if not items: raise SystemExit('An available iOS 27 iPhone simulator is required')
-items.sort(key=lambda d:(d['name']!='iPhone 18 Pro Max',d['name']))
-print(items[0]['udid'])
+record = {'source_sha': os.environ.get('GITHUB_SHA'), 'workflow_run_id': os.environ.get('GITHUB_RUN_ID'),
+          'runner_image_version': os.environ.get('ImageVersion'), 'runner_image_os': os.environ.get('ImageOS'),
+          'runner_architecture': os.environ.get('RUNNER_ARCH'), 'machine': platform.machine(),
+          'macos_version': platform.mac_ver()[0]}
+Path('build/release/runner-identity.json').write_text(json.dumps(record, indent=2) + '\n')
 PY
-)
 python3 scripts/ci/run-bounded.py --seconds 240 --label simulator-boot -- xcrun simctl boot "$ROOMWAVE_SIMULATOR_ID" >/dev/null 2>&1 || true
 python3 scripts/ci/run-bounded.py --seconds 240 --label simulator-ready -- xcrun simctl bootstatus "$ROOMWAVE_SIMULATOR_ID" -b
 mkdir -p build/release/evidence
@@ -46,22 +49,34 @@ collect_native_diagnostics() {
   fi
 }
 python3 scripts/ci/watch-arcade-recording.py --simulator "$ROOMWAVE_SIMULATOR_ID" \
-  --output build/release/evidence/Roomwave-actual-ui-test.mp4 &
+  --output build/release/evidence/Roomwave-actual-ui-test.mp4 >build/release/recording-observer.log 2>&1 &
 ROOMWAVE_CAPTURE_PID=$!
-stop_capture() { kill -TERM "$ROOMWAVE_CAPTURE_PID" 2>/dev/null || true; wait "$ROOMWAVE_CAPTURE_PID" || true; }
-trap 'stop_capture; collect_native_diagnostics' EXIT
+python3 scripts/ci/watch-arcade-diagnostics.py --simulator "$ROOMWAVE_SIMULATOR_ID" \
+  --output-dir build/release/evidence/live-diagnostics --seconds 1800 >build/release/diagnostic-observer.log 2>&1 &
+ROOMWAVE_DIAGNOSTIC_PID=$!
+stop_observers() {
+  local pid running
+  for pid in "$ROOMWAVE_CAPTURE_PID" "$ROOMWAVE_DIAGNOSTIC_PID"; do
+    # Signal only a still-owned background job, never a recycled host PID.
+    for running in $(jobs -pr); do
+      if [[ "$running" == "$pid" ]]; then kill -TERM "$pid" 2>/dev/null || true; fi
+    done
+    wait "$pid" || true
+  done
+}
+trap 'stop_observers; collect_native_diagnostics' EXIT
 if ! python3 scripts/ci/run-bounded.py --seconds 1260 --label native-tests -- xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configuration Debug \
   -destination "platform=iOS Simulator,id=$ROOMWAVE_SIMULATOR_ID" \
   -derivedDataPath build/release/DerivedData -resultBundlePath build/release/NativeTests.xcresult \
   -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test > build/release/native-test.log 2>&1; then
-  stop_capture
+  stop_observers
   trap - EXIT
   collect_native_diagnostics
   tail -n 120 build/release/native-test.log
   exit 1
 fi
-stop_capture
+stop_observers
 trap - EXIT
 tail -n 45 build/release/native-test.log
 collect_native_diagnostics
