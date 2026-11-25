@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // External-beta staging only. Never uploads, signs, invites, or sends notifications.
 import { createPrivateKey, sign, randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync, existsSync, statSync } from 'node:fs';
-import { resolve, dirname, relative } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync, existsSync,
+  fstatSync, readSync, constants } from 'node:fs';
+import { resolve, dirname, relative, isAbsolute, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const APP = '6837899703';
@@ -398,20 +399,42 @@ export async function execute({ api, journal, buildID, action = 'preflight', app
   }
 }
 
-function privateJSON(path, contactFile = false) {
+export function privateJSON(path, contactFile = false) {
+  let descriptor;
   try {
     const absolute = resolve(path);
     if (contactFile) {
       const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
       const inside = relative(root, absolute);
-      ensure(inside.startsWith('..') || inside.startsWith('/'), 'BLOCKED_INPUT', 'Keep the private review contact file outside the repository');
-      if (process.platform !== 'win32') ensure((statSync(absolute).mode & 0o077) === 0, 'BLOCKED_INPUT', 'Private contact file must not grant group/other access');
+      ensure(inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside),
+        'BLOCKED_INPUT', 'Keep the private review contact file outside the repository');
     }
-    ensure(statSync(absolute).size <= 20000, 'BLOCKED_INPUT', 'Private input file exceeds the size limit');
-    return JSON.parse(readFileSync(absolute, 'utf8'));
+    // O_NOFOLLOW rejects a final-component symlink where supported. O_NONBLOCK
+    // prevents a FIFO from hanging during open, before the regular-file check.
+    descriptor = openSync(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    const info = fstatSync(descriptor);
+    ensure(info.isFile(), 'BLOCKED_INPUT', 'Input JSON must be a regular file');
+    if (contactFile && process.platform !== 'win32') {
+      ensure((info.mode & 0o077) === 0, 'BLOCKED_INPUT', 'Private contact file must not grant group/other access');
+    }
+    const limit = 20000;
+    ensure(info.size <= limit, 'BLOCKED_INPUT', 'Private input file exceeds the size limit');
+    // The opened file can grow after fstat. Read at most limit+1 bytes from the
+    // same descriptor and reject overflow before decoding or parsing any values.
+    const bytes = Buffer.alloc(limit + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const count = readSync(descriptor, bytes, length, bytes.length - length, null);
+      if (count === 0) break;
+      length += count;
+    }
+    ensure(length <= limit, 'BLOCKED_INPUT', 'Private input file exceeds the size limit');
+    return JSON.parse(bytes.subarray(0, length).toString('utf8'));
   } catch (error) {
     if (error instanceof Blocked) throw error;
     throw new Blocked('BLOCKED_INPUT', 'Input JSON could not be read; values are not printed');
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
   }
 }
 
