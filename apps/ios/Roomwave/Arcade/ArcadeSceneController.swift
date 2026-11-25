@@ -58,6 +58,12 @@ final class ArcadeSceneController: ArcadeSceneDriving {
 
     init() {
         arView = ARView(frame: .zero, cameraMode: .nonAR, automaticallyConfigureSession: false)
+        #if targetEnvironment(simulator)
+        // Simulator translates Metal through the host GPU and lacks some device
+        // shader features. Keep the authored contact patch below, without adding
+        // RealityKit's automatic grounding-shadow pass on this render target.
+        arView.renderOptions.insert(.disableGroundingShadows)
+        #endif
         arView.environment.background = .color(ArcadeGeometry.rgb(0.018, 0.025, 0.06))
         arView.environment.lighting.intensityExponent = 0.7
         // The portrait FOV is explicit, avoiding aspect-dependent horizontal framing.
@@ -430,11 +436,17 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         let key = DirectionalLight()
         key.light.color = biome == .dawn ? ArcadeGeometry.rgb(1, 0.85, 0.76) : ArcadeGeometry.rgb(0.64, 0.81, 1)
         key.light.intensity = biome == .midnight ? 1500 : 2800
+        #if targetEnvironment(simulator)
+        key.shadow = nil
+        #endif
         key.look(at: .zero, from: SIMD3(-10, 18, 9), relativeTo: nil)
         anchor.addChild(key)
         let fill = DirectionalLight()
         fill.light.color = ArcadeGeometry.rgb(0.32, 0.80, 0.91)
         fill.light.intensity = biome == .midnight ? 500 : 900
+        #if targetEnvironment(simulator)
+        fill.shadow = nil
+        #endif
         fill.look(at: .zero, from: SIMD3(8, 6, -10), relativeTo: nil)
         anchor.addChild(fill)
     }
