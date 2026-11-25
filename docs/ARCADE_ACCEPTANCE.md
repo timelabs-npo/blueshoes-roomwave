@@ -64,6 +64,18 @@ The consolidated corrections passed 100 local continuity/release tests and 31 CI
 | Gameplay and beta usability | `01a214bc-c165-7352-ace9-17d8558e6d6e` |
 | Public TestFlight continuity | `01a214bc-c11c-72f3-8f03-9466fb85059f` |
 
+### Confirmed Metal simulator failure and controlled comparison
+
+Source `ee74d5d146ef97daa3cbf5fe32113551abc385b6` passed continuity [45713637714](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45713637714) and all four CodeQL analyses [45713627574](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45713627574). Native [45713637769](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45713637769), attempt 1, **FAILED** on 26 November at 01:49 Moscow time. It selected iPhone 18 Pro Max on the general iOS 27.2 runtime, build `24B8117`, with SDK 27.2. The core-test command succeeded. Four hosted tests passed, two hosted tests crashed, and the UI app crashed during launch before the Play query. No required gameplay captures or unsigned archive completed.
+
+Three recovered `.ips` reports show `EXC_CRASH/SIGABRT`, termination namespace `METAL`, code `102`, and an interrupted connection to `SimMetalHost`. Two hosted processes detected the lost service during skeletal-pose buffer updates; the UI process detected it during `ARView.snapshot`. These are client abort sites, not proof of what killed the service. The UI startup trace completed audio preparation, scene loading and bootstrap before the crash. A PID-verified sample attempt timed out without a report. The post-test screenshot shows SpringBoard, not a playable game.
+
+The lightweight artifact `15069542700` has SHA-256 `29665242be4fa9995b2b3c43d09744b0a0494fff68f63e4c06f9575125afca4d`; the full evidence artifact `15070540593`, used to recover the three manifest-listed crash reports, has SHA-256 `bd635ecda54b012f249c8741799e3aefa4b44e203f35118ebeb9f744e2f31156`. The checked-out merge `da1edea70648d8fd6a8899babe9b33dcb7a2e66c` and reviewed source share tree `07c2d289def47de8c5fad2f2b88953208c1f0516`.
+
+The next diagnostic compares unchanged application/asset source across the installed general iOS 27.0 and SDK-matched 27.2 runtimes. The unsigned workflow exposes an explicit `runtime_version=27.0` comparison option; its receipt retains the actual SDK and marks the runtime override. This comparison runs the same ordinary-input, render and hosted tests. It does not satisfy the SDK-matched release gate or create a signed release; an unsigned archive is unnecessary for this diagnostic. The normal PR and protected TestFlight validation continue to require the SDK-matched runtime, with no automatic fallback.
+
+Native diagnostics now retain application crash attachments and collect bounded, time-filtered `SimMetalHost` service crash reports. These reports are evidence about the same job window, not proof of exclusive ownership or a specific root cause. A unified-log query is not implemented. Failed or partial collection remains visible in its receipt. No production rendering change is justified solely by the client abort stacks.
+
 ## Human and device gates still open
 
 Observe at least a few first-time players without spoken coaching. Record device/build, time to first meaningful input, whether the charge/release/dive/landing relationship is understood, whether collision causes are readable, and whether players voluntarily retry. Keep actual observations and disagreements; do not convert an automated survival trace into a PASS.

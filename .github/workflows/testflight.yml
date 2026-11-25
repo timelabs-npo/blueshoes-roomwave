@@ -27,7 +27,8 @@ jobs:
   validate:
     if: github.ref == 'refs/heads/main'
     runs-on: xcode-27
-    timeout-minutes: 45
+    # Preserve evidence even when bounded native work approaches its own caps.
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -41,10 +42,11 @@ jobs:
       - name: Install project generator
         run: command -v xcodegen >/dev/null || brew install xcodegen
       - name: Validate arcade rules, real touch flow and native rendering
-        timeout-minutes: 38
+        timeout-minutes: 55
         run: bash scripts/release/validate-native.sh
         env:
           DEFER_ARCHIVE_TO_SIGNED_RELEASE: ${{ inputs.export_ipa || inputs.upload }}
+          ROOMWAVE_DIAGNOSTIC_RUNTIME: ''
       - name: Preserve lightweight native review evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -59,10 +61,15 @@ jobs:
             build/release/evidence/ui-attachments/*.json
             build/release/evidence/ui-attachments/*.png
             build/release/evidence/ui-attachments/*.txt
+            build/release/evidence/ui-attachments/*.ips
+            build/release/evidence/ui-attachments/*.crash
             build/release/evidence/live-diagnostics
+            build/release/evidence/metal-diagnostics
             build/release/*identity.json
+            build/release/native-run-start.json
             build/release/simulator-selection.json
             build/release/native-test.log
+            build/release/metal-diagnostics.log
             build/release/diagnostic-observer.log
             build/release/recording-observer.log
       - name: Preserve native validation evidence

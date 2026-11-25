@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Select an available iPhone on the actual SDK major.minor; never fall back.
 
+An explicit --runtime-version permits a diagnostic comparison on an installed
+generic runtime in the same SDK major and no newer than that SDK. It selects
+the exact normalized version, not a nearby patch, and is labeled diagnostic
+in the receipt. Such a comparison is not SDK-matched release evidence.
+
 Reads simctl JSON only. Does not boot, create, erase, or delete a simulator.
 On success stdout contains exactly the selected UDID. A JSON receipt records
 the actual selected device/runtime. Errors go to stderr and produce BLOCKED
@@ -22,6 +27,10 @@ RUNTIME_ID = re.compile(r"com\.apple\.CoreSimulator\.SimRuntime\.iOS-([0-9]+)-([
 DEVICE_RUNTIME_ID = re.compile(r"com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9]+-[0-9]+(?:-[0-9]+)?-iPhone[0-9]+-[0-9]+\Z")
 UDID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\Z")
 PRERELEASE = re.compile(r"\b(?:beta|alpha|seed|preview|rc|release\s+candidate|internal)\b", re.IGNORECASE)
+DEFAULT_POLICY = "exact-model-exact-sdk-major-minor-highest-runtime-patch"
+DIAGNOSTIC_POLICY = "diagnostic-exact-model-exact-runtime-version-no-newer-than-sdk"
+DIAGNOSTIC_MODEL = "iPhone 18 Pro Max"
+DIAGNOSTIC_DEVICE_TYPE = "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max"
 
 
 class SelectionError(Exception):
@@ -43,10 +52,27 @@ def version_tuple(value, code):
     return values
 
 
-def select_simulator(devices_document, runtimes_document, sdk_version, model):
+def selection_metadata(runtime_version):
+    return {
+        "selectionPolicy": DIAGNOSTIC_POLICY if runtime_version is not None else DEFAULT_POLICY,
+        "diagnosticRuntimeOverride": runtime_version is not None,
+        "requestedRuntimeVersion": runtime_version,
+    }
+
+
+def select_simulator(devices_document, runtimes_document, sdk_version, model, runtime_version=None):
     sdk = version_tuple(sdk_version, "INVALID_SDK_VERSION")
     require(isinstance(model, str) and model and model == model.strip(),
             "INVALID_MODEL", "An exact nonempty device model is required.")
+    requested = None
+    if runtime_version is not None:
+        requested = version_tuple(runtime_version, "INVALID_RUNTIME_OVERRIDE")
+        require(requested[0] == sdk[0], "DIAGNOSTIC_RUNTIME_MAJOR_MISMATCH",
+                "Diagnostic runtime must have the same major version as the actual SDK.")
+        require(requested <= sdk, "DIAGNOSTIC_RUNTIME_NEWER_THAN_SDK",
+                "Diagnostic runtime must not be newer than the actual SDK.")
+        require(model == DIAGNOSTIC_MODEL, "INVALID_DIAGNOSTIC_MODEL",
+                "Diagnostic runtime comparison requires the exact iPhone 18 Pro Max model.")
     require(isinstance(devices_document, dict) and isinstance(devices_document.get("devices"), dict),
             "INVALID_DEVICES_DOCUMENT", "Expected a simctl devices object.")
     require(isinstance(runtimes_document, dict) and isinstance(runtimes_document.get("runtimes"), list),
@@ -78,7 +104,7 @@ def select_simulator(devices_document, runtimes_document, sdk_version, model):
         require(identifier_version == version, "RUNTIME_VERSION_MISMATCH", "Runtime identifier and version disagree.")
         require(identifier not in seen_runtime_ids, "AMBIGUOUS_RUNTIME_IDENTIFIER", "An available runtime identifier occurs more than once.")
         seen_runtime_ids.add(identifier)
-        if version[:2] != sdk[:2]:
+        if (version != requested if requested is not None else version[:2] != sdk[:2]):
             continue
         require(runtime.get("platform", "iOS") == "iOS",
                 "RUNTIME_PLATFORM_MISMATCH", "The selected runtime must be iOS.")
@@ -93,6 +119,9 @@ def select_simulator(devices_document, runtimes_document, sdk_version, model):
             require(isinstance(device, dict), "INVALID_DEVICE_RECORD", "Device entries must be objects.")
             if device.get("name") != model or device.get("isAvailable") is not True:
                 continue
+            if requested is not None:
+                require(device.get("deviceTypeIdentifier") == DIAGNOSTIC_DEVICE_TYPE,
+                        "DEVICE_TYPE_MISMATCH", "Diagnostic device name and type identifier must agree.")
             udid = device.get("udid")
             require(isinstance(udid, str) and UDID.fullmatch(udid) is not None and uuid.UUID(udid).int != 0,
                     "INVALID_DEVICE_UDID", "Matching device must provide a nonzero canonical UUID.")
@@ -102,17 +131,21 @@ def select_simulator(devices_document, runtimes_document, sdk_version, model):
             require(isinstance(state, str) and state, "INVALID_DEVICE_STATE", "Matching device must provide its actual state.")
             candidates.append((version, identifier, build, udid.casefold(), device, runtime))
 
-    require(matching_runtimes > 0, "NO_MATCHING_RUNTIME",
-            f"No available non-prerelease iOS runtime matches SDK {sdk[0]}.{sdk[1]}.")
+    missing_runtime = (
+        f"No available non-prerelease generic iOS runtime matches diagnostic version {runtime_version}."
+        if requested is not None else
+        f"No available non-prerelease iOS runtime matches SDK {sdk[0]}.{sdk[1]}.")
+    require(matching_runtimes > 0, "NO_MATCHING_RUNTIME", missing_runtime)
     require(candidates, "NO_MATCHING_DEVICE",
             f"No available exact model {model!r} exists on a matching iOS runtime.")
-    # Highest numeric patch; ties are independent of JSON order and boot state.
+    # Default: highest numeric patch. Diagnostic: all candidates have the exact
+    # requested version. Ties never depend on JSON order or boot state.
     candidates.sort(key=lambda item: (-item[0][2], item[1], item[2], item[3]))
     version, identifier, build, _, device, runtime = candidates[0]
     return {
         "schemaVersion": 1,
         "status": "SELECTED",
-        "selectionPolicy": "exact-model-exact-sdk-major-minor-highest-runtime-patch",
+        **selection_metadata(runtime_version),
         "sdkVersion": sdk_version,
         "sdkMajorMinor": f"{sdk[0]}.{sdk[1]}",
         "requestedModel": model,
@@ -161,16 +194,19 @@ def main(argv=None):
     parser.add_argument("--devices", type=Path, required=True)
     parser.add_argument("--runtimes", type=Path, required=True)
     parser.add_argument("--sdk-version", required=True)
+    parser.add_argument("--runtime-version",
+                        help="Diagnostic-only exact installed runtime version, within the SDK major and not newer.")
     parser.add_argument("--model", default="iPhone 18 Pro Max")
     parser.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args(argv)
     receipt = {"schemaVersion": 1, "status": "BLOCKED",
-               "sdkVersion": args.sdk_version, "requestedModel": args.model}
+               "sdkVersion": args.sdk_version, "requestedModel": args.model,
+               **selection_metadata(args.runtime_version)}
     receipt_is_input = args.receipt.resolve() in {args.devices.resolve(), args.runtimes.resolve()}
     try:
         require(not receipt_is_input, "RECEIPT_OVERWRITES_INPUT", "Receipt must not overwrite an input inventory.")
         receipt = select_simulator(load_document(args.devices), load_document(args.runtimes),
-                                   args.sdk_version, args.model)
+                                   args.sdk_version, args.model, args.runtime_version)
     except SelectionError as error:
         receipt.update(code=error.code, message=str(error))
     except (OSError, ValueError, TypeError):

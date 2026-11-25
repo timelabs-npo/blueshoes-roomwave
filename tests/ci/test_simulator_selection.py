@@ -1,4 +1,4 @@
-"""Offline CLI tests for SDK-aligned selection; no native tools or host mutation."""
+"""Offline CLI tests for SDK and explicit diagnostic selection; no native tools."""
 import copy
 import json
 from pathlib import Path
@@ -74,6 +74,11 @@ class SimulatorSelectionTests(unittest.TestCase):
         self.assertEqual(result.stdout, CURRENT + "\n")
         self.assertEqual(result.stderr, "")
         self.assertEqual(receipt["sdkVersion"], "27.2")
+        self.assertEqual(receipt["sdkMajorMinor"], "27.2")
+        self.assertFalse(receipt["diagnosticRuntimeOverride"])
+        self.assertIsNone(receipt["requestedRuntimeVersion"])
+        self.assertEqual(receipt["selectionPolicy"],
+                         "exact-model-exact-sdk-major-minor-highest-runtime-patch")
         self.assertEqual(receipt["runtime"]["version"], "27.2")
         self.assertEqual(receipt["runtime"]["buildVersion"], "24C109")
         self.assertEqual(receipt["device"]["state"], "Booted")
@@ -164,6 +169,120 @@ class SimulatorSelectionTests(unittest.TestCase):
         result, receipt = invoke(devices, runtimes, sdk="28.0",
                                  stale_receipt={"status": "SELECTED", "device": {"udid": OLD}})
         self.assert_blocked(result, receipt, "NO_MATCHING_RUNTIME")
+
+    def test_explicit_older_runtime_preserves_actual_sdk_and_marks_diagnostic(self):
+        devices, runtimes = fixture()
+        result, receipt = invoke(devices, runtimes, extra=("--runtime-version", "27.0"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, OLD + "\n")
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(receipt["sdkVersion"], "27.2")
+        self.assertEqual(receipt["sdkMajorMinor"], "27.2")
+        self.assertEqual(receipt["runtime"]["version"], "27.0")
+        self.assertEqual(receipt["runtime"]["identifier"], "com.apple.CoreSimulator.SimRuntime.iOS-27-0")
+        self.assertEqual(receipt["device"]["name"], MODEL)
+        self.assertEqual(receipt["device"]["deviceTypeIdentifier"],
+                         "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max")
+        self.assertTrue(receipt["diagnosticRuntimeOverride"])
+        self.assertEqual(receipt["requestedRuntimeVersion"], "27.0")
+        self.assertEqual(receipt["selectionPolicy"],
+                         "diagnostic-exact-model-exact-runtime-version-no-newer-than-sdk")
+
+    def test_override_matching_sdk_still_cannot_be_mislabeled_as_default(self):
+        devices, runtimes = fixture()
+        result, receipt = invoke(devices, runtimes, extra=("--runtime-version", "27.2.0"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, CURRENT + "\n")
+        self.assertTrue(receipt["diagnosticRuntimeOverride"])
+        self.assertEqual(receipt["requestedRuntimeVersion"], "27.2.0")
+        self.assertTrue(receipt["selectionPolicy"].startswith("diagnostic-"))
+
+    def test_unavailable_diagnostic_runtime_or_device_never_uses_sdk_runtime(self):
+        for unavailable in ("runtime", "device"):
+            with self.subTest(unavailable=unavailable):
+                devices, runtimes = fixture()
+                if unavailable == "runtime":
+                    runtimes["runtimes"][0]["isAvailable"] = False
+                    code = "NO_MATCHING_RUNTIME"
+                else:
+                    devices["devices"][runtimes["runtimes"][0]["identifier"]][0]["isAvailable"] = False
+                    code = "NO_MATCHING_DEVICE"
+                result, receipt = invoke(devices, runtimes, extra=("--runtime-version", "27.0"))
+                self.assert_blocked(result, receipt, code)
+                self.assertTrue(receipt["diagnosticRuntimeOverride"])
+                self.assertEqual(receipt["requestedRuntimeVersion"], "27.0")
+                self.assertEqual(receipt["sdkVersion"], "27.2")
+
+    def test_malformed_newer_and_cross_major_overrides_are_blocked(self):
+        cases = [("", "INVALID_RUNTIME_OVERRIDE"), ("27.x", "INVALID_RUNTIME_OVERRIDE"),
+                 ("27", "INVALID_RUNTIME_OVERRIDE"), ("27.0.0.1", "INVALID_RUNTIME_OVERRIDE"),
+                 ("27.0 Beta", "INVALID_RUNTIME_OVERRIDE"), (" 27.0", "INVALID_RUNTIME_OVERRIDE"),
+                 ("27.3", "DIAGNOSTIC_RUNTIME_NEWER_THAN_SDK"),
+                 ("27.2.1", "DIAGNOSTIC_RUNTIME_NEWER_THAN_SDK"),
+                 ("26.9", "DIAGNOSTIC_RUNTIME_MAJOR_MISMATCH"),
+                 ("28.0", "DIAGNOSTIC_RUNTIME_MAJOR_MISMATCH")]
+        devices, runtimes = fixture()
+        for requested, code in cases:
+            with self.subTest(requested=requested):
+                result, receipt = invoke(devices, runtimes, extra=("--runtime-version", requested),
+                                         stale_receipt={"status": "SELECTED", "device": {"udid": CURRENT}})
+                self.assert_blocked(result, receipt, code)
+                self.assertTrue(receipt["diagnosticRuntimeOverride"])
+                self.assertEqual(receipt["requestedRuntimeVersion"], requested)
+                self.assertTrue(receipt["selectionPolicy"].startswith("diagnostic-"))
+
+    def test_diagnostic_exact_version_does_not_silently_choose_neighboring_patch(self):
+        devices, runtimes = fixture()
+        patched = runtime("27.0.1")
+        runtimes["runtimes"][0] = patched
+        devices["devices"][patched["identifier"]] = [device(PATCH)]
+        self.assert_blocked(*invoke(devices, runtimes, extra=("--runtime-version", "27.0")),
+                            "NO_MATCHING_RUNTIME")
+        result, receipt = invoke(devices, runtimes, extra=("--runtime-version", "27.0.1"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, PATCH + "\n")
+        self.assertEqual(receipt["runtime"]["version"], "27.0.1")
+        # The upper bound compares all three numeric components of the actual SDK.
+        runtimes["runtimes"][1] = runtime("27.2.1")
+        devices["devices"][runtimes["runtimes"][1]["identifier"]] = [device(CURRENT)]
+        result, receipt = invoke(devices, runtimes, sdk="27.2.1",
+                                 extra=("--runtime-version", "27.2.1"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(receipt["sdkVersion"], "27.2.1")
+
+    def test_device_specific_runtime_is_excluded_in_diagnostic_mode(self):
+        devices, runtimes = fixture()
+        specialized = runtime("27.0", identifier="com.apple.CoreSimulator.SimRuntime.iOS-27-0-iPhone19-4")
+        runtimes["runtimes"].insert(0, specialized)
+        devices["devices"][specialized["identifier"]] = [device(PATCH)]
+        result, receipt = invoke(devices, runtimes, extra=("--runtime-version", "27.0"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, OLD + "\n")
+        self.assertEqual(receipt["matchingAvailableDeviceCount"], 1)
+        self.assert_blocked(*invoke(devices, {"runtimes": [specialized]},
+                                   extra=("--runtime-version", "27.0")), "NO_MATCHING_RUNTIME")
+
+    def test_diagnostic_runtime_preserves_release_label_and_identity_guards(self):
+        for labels in ({"name": "iOS 27.0 Beta 3"}, {"isBeta": True}, {"isInternal": True}):
+            with self.subTest(labels=labels):
+                devices, runtimes = fixture()
+                runtimes["runtimes"][0].update(labels)
+                self.assert_blocked(*invoke(devices, runtimes, extra=("--runtime-version", "27.0")),
+                                    "NO_MATCHING_RUNTIME")
+        devices, runtimes = fixture()
+        runtimes["runtimes"][0]["version"] = "27.1"
+        self.assert_blocked(*invoke(devices, runtimes, extra=("--runtime-version", "27.0")),
+                            "RUNTIME_VERSION_MISMATCH")
+
+    def test_diagnostic_device_must_be_exact_model_and_type(self):
+        devices, runtimes = fixture()
+        self.assert_blocked(*invoke(devices, runtimes,
+                                   extra=("--runtime-version", "27.0", "--model", "iPhone 18 Pro")),
+                            "INVALID_DIAGNOSTIC_MODEL")
+        devices["devices"][runtimes["runtimes"][0]["identifier"]][0]["deviceTypeIdentifier"] = \
+            "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro"
+        self.assert_blocked(*invoke(devices, runtimes, extra=("--runtime-version", "27.0")),
+                            "DEVICE_TYPE_MISMATCH")
 
 
 if __name__ == "__main__":
