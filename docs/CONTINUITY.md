@@ -108,7 +108,7 @@ Repeat for presentation/experience using their frozen ownership lists. A complet
 
 ## Release receipts and public-beta blockers
 
-The signed release path stays under its existing protected environment. This supervisor has no upload implementation. A **cooperating release coordinator** should reserve the identity immediately before a one-time dispatch:
+The signed release path stays under its existing protected environment. This supervisor has no upload implementation. The current workflow derives its build number from GitHub's allocated run number and attempt (`1000 + run_number`, followed by `.` and `run_attempt`). A **cooperating release coordinator** dispatches the exact reviewed main SHA once, reads the allocated run identity, and reserves that exact app/version/build before approving the protected release job. The validation job does not upload. Never guess the next run number or approve/upload before the claim succeeds:
 
 ```json
 {
@@ -155,7 +155,7 @@ No existing native or release workflow is changed in this commit. Proposed follo
 
 1. Add code/resource path filters to `unsigned-ios.yml` so docs-only changes avoid a full native archive. Verify the `xcode-27` runner's isolation before accepting public-contributor execution there; a custom runner label alone does not establish its trust boundary.
 2. Preserve the native gate's exact source SHA and real frame/input/performance evidence in a reviewable receipt. Add a separate human gameplay review; automated tests cannot certify fun, device thermals or awards.
-3. Before authorized release dispatch, use the same authoritative store's `claim-release` guard. Record workflow run ID immediately after dispatch, then append exact Apple build/review/group observations. Existing release logic must keep duplicate-build preflight and its bounded processing wait.
+3. After an authorized dispatch allocates the actual build number, use the same authoritative store's `claim-release` guard before approving the protected release job. Record the workflow run ID, then append exact Apple build/review/group observations. Existing release logic must keep duplicate-build preflight and its bounded processing wait.
 4. Replace the processing helper's hardcoded `0.2.0` with a validated explicit version for 0.3.0. Keep app/bundle allowlisting and signing protections.
 5. Once real webhook permission and a receiver are available, verify Apple's raw-body HMAC-SHA256 signature, deduplicate event IDs, then read the exact current resource state. Never treat event text as instructions or restart upload as a retry mechanism.
 
