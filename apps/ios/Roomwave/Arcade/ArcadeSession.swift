@@ -45,6 +45,9 @@ final class ArcadeSession: ObservableObject {
     private var calloutID = 0
 
     var reducedMotion: Bool { preferences.reducedMotion || systemReducedMotion }
+    var availableCourseIDs: [String] {
+        ArcadeProfile.courseIDs + compiled.keys.filter { !ArcadeProfile.courseIDs.contains($0) }.sorted()
+    }
     var title: String { course?.definition.title ?? selectedID.replacingOccurrences(of: "-", with: " ").uppercased() }
     var subtitle: String { course?.definition.subtitle ?? "Find your flow above the current." }
     var tutorial: String? {
@@ -109,8 +112,8 @@ final class ArcadeSession: ObservableObject {
 
     func selectCourse(offset: Int) {
         guard !isLoading else { return }
-        let index = ArcadeProfile.courseIDs.firstIndex(of: selectedID) ?? (offset > 0 ? -1 : 0)
-        let ids = ArcadeProfile.courseIDs
+        let ids = availableCourseIDs
+        let index = ids.firstIndex(of: selectedID) ?? (offset > 0 ? -1 : 0)
         requestCourse(ids[(index + offset + ids.count) % ids.count])
     }
 
@@ -177,6 +180,11 @@ final class ArcadeSession: ObservableObject {
         guard screen == .playing, isActive else { held = false; return }
         held = pressed
         if pressed, state?.grounded == false { dove = true }
+    }
+
+    func cancelTouch() {
+        held = false
+        if screen == .playing { cancelInputOnNextTick = true }
     }
 
     func pause() {

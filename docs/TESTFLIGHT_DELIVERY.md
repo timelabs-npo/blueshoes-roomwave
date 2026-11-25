@@ -1,4 +1,6 @@
-# Roomwave TestFlight delivery
+# Roomwave TestFlight identity and pilot history
+
+The active arcade rebuild is **0.3.0**. See [arcade acceptance](ARCADE_ACCEPTANCE.md), [continuity](CONTINUITY.md) and [external-beta operations](PUBLIC_BETA.md). The 0.2.0 receipt below is historical and remains preserved at `archive/20261125-pilot-1002-1`; it does not establish the new arcade's readiness.
 
 The user authorized replacing the existing Molecular/Molecule Foundry beta with Roomwave. Roomwave is delivered under the existing Apple identity below. This workflow uploads a TestFlight beta; it does not submit or publish an App Store production update.
 
@@ -34,6 +36,7 @@ The abandoned new-bundle plan received an Apple registration 403 and had no app 
 
 `testflight.yml` is manual and accepts:
 
+- `expected_sha`: the exact reviewed main commit; the job fails if the dispatched source differs.
 - `export_ipa=true`: validate native paths, sign and export.
 - `upload=true`: also verify the exact Apple app ID/bundle and unused build number, then upload through Xcode's transporter tooling.
 
@@ -41,7 +44,7 @@ Validation always runs shared Swift tests and the native simulator tests for pho
 
 The release job creates an ephemeral keychain, verifies the Apple-issued profile and compiled app identity, exports a signed IPA, and optionally uploads it. Secret material and the temporary keychain are removed on exit; the previous keychain search list is restored. The selected signing certificate must be included in the profile. An already installed byte-identical profile is reused and left intact; a conflicting profile is never overwritten. Artifacts contain validation evidence and receipts; signing material and the IPA are not published as repository artifacts.
 
-Build numbers use `(1000 + GITHUB_RUN_NUMBER).GITHUB_RUN_ATTEMPT`, above the existing `23.1` range. Preflight rejects a number already present in the Apple app. Marketing version is `0.2.0`. Receipts record the actual source commit, app ID, version, build, signature verification and IPA SHA-256. Apple's processing result is recorded separately with a bounded wait. Upload acceptance is not TestFlight availability.
+Build numbers use `(1000 + GITHUB_RUN_NUMBER).GITHUB_RUN_ATTEMPT`, above the existing `23.1` range. Preflight rejects a number already present in the Apple app. Marketing version now comes from the root `VERSION` file. Receipts record the actual source commit, app ID, version, build, signature verification and IPA SHA-256. Apple's processing result is recorded separately with a bounded wait. Upload acceptance is not TestFlight availability.
 
 ## Internal availability
 

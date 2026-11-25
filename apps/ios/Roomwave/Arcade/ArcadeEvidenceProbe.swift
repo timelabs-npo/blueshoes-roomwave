@@ -14,6 +14,8 @@ enum ArcadeEvidenceProbe {
     private static var captured = Set<String>()
     private static var latestTick = 0
     private static var latestCourse = ""
+    private static var latestScreen: ArcadeScreen?
+    private static var generation: UInt64 = 0
     private static var lastGrounded = true
     private static var observations: [[String: Any]] = []
     private static let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -27,11 +29,15 @@ enum ArcadeEvidenceProbe {
             try? FileManager.default.removeItem(at: directory)
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
+        if course.definition.id != latestCourse || state.tick < latestTick ||
+            (screen == .playing && latestScreen == .home) { generation &+= 1 }
+        latestScreen = screen
         latestTick = state.tick
         latestCourse = course.definition.id
         if !events.isEmpty && observations.count < 600 {
             observations.append([
                 "tick": state.tick, "course": course.definition.id,
+                "run_generation": generation,
                 "distance": state.distance, "foot_y": state.height,
                 "grounded": state.grounded, "score": state.score,
                 "events": events.map(\.kind.rawValue)
@@ -62,13 +68,16 @@ enum ArcadeEvidenceProbe {
         let courseID = course.definition.id
         let footY = state.height
         let roadY = course.pose(at: state.distance).center.y
+        let requestGeneration = generation
         arView.snapshot(saveToHDR: false) { image in
             let png = image?.pngData()
             let width = image?.size.width ?? 0
             let height = image?.size.height ?? 0
             Task { @MainActor in
                 pending.remove(mode)
-                guard latestCourse == courseID, let png, width >= 100, height >= 100 else { return }
+                guard generation == requestGeneration, latestScreen == screen,
+                      latestCourse == courseID, latestTick >= requestTick,
+                      let png, width >= 100, height >= 100 else { return }
                 let filename = mode + ".png"
                 do {
                     try png.write(to: directory.appendingPathComponent(filename), options: .atomic)
@@ -78,7 +87,8 @@ enum ArcadeEvidenceProbe {
                         "bundle": Bundle.main.bundleIdentifier ?? "",
                         "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
                         "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
-                        "course_id": courseID, "request_tick": requestTick, "capture_tick": latestTick,
+                        "course_id": courseID, "run_generation": requestGeneration,
+                        "request_tick": requestTick, "capture_tick": latestTick,
                         "grounded_at_request": state.grounded, "foot_y_at_request": footY,
                         "road_y_at_request": roadY, "score_at_request": state.score,
                         "image_filename": filename, "renderable_layers": layers,

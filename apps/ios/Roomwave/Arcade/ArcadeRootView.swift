@@ -26,7 +26,7 @@ struct ArcadeRootView: View {
                                startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea().allowsHitTesting(false)
                 if session.screen == .playing, session.errorMessage == nil {
-                    ArcadeTouchSurface { session.setPressed($0) }
+                    ArcadeTouchSurface(changed: { session.setPressed($0) }, cancelled: { session.cancelTouch() })
                         .ignoresSafeArea()
                         .accessibilityElement(children: .ignore)
                         .accessibilityAddTraits(.isButton)
@@ -103,12 +103,12 @@ struct ArcadeRootView: View {
                     courseArrow("chevron.right", offset: 1)
                 }
                 HStack(spacing: 8) {
-                    ForEach(ArcadeProfile.courseIDs, id: \.self) { id in
+                    ForEach(session.availableCourseIDs, id: \.self) { id in
                         Capsule().fill(id == session.selectedID ? teal : .white.opacity(0.25))
                             .frame(width: id == session.selectedID ? 24 : 6, height: 4)
                     }
                 }.accessibilityLabel(ArcadeProfile.courseIDs.contains(session.selectedID)
-                    ? "Course \((ArcadeProfile.courseIDs.firstIndex(of: session.selectedID) ?? 0) + 1) of 3"
+                    ? "Course \((session.availableCourseIDs.firstIndex(of: session.selectedID) ?? 0) + 1) of \(session.availableCourseIDs.count)"
                     : "Locally created course")
                 if let best = session.selectedBest {
                     Text("BEST \(best.score.formatted())  ·  \(best.medal.rawValue.uppercased())")
@@ -374,20 +374,26 @@ private struct ArcadeSceneHost: UIViewRepresentable {
 @MainActor
 private struct ArcadeTouchSurface: UIViewRepresentable {
     let changed: (Bool) -> Void
+    let cancelled: () -> Void
     func makeUIView(context: Context) -> ArcadeTouchView {
         let view = ArcadeTouchView()
         view.changed = changed
+        view.cancelled = cancelled
         view.backgroundColor = .clear
         view.isMultipleTouchEnabled = true
         return view
     }
-    func updateUIView(_ uiView: ArcadeTouchView, context: Context) { uiView.changed = changed }
+    func updateUIView(_ uiView: ArcadeTouchView, context: Context) {
+        uiView.changed = changed
+        uiView.cancelled = cancelled
+    }
     static func dismantleUIView(_ uiView: ArcadeTouchView, coordinator: ()) { uiView.cancel() }
 }
 
 @MainActor
 private final class ArcadeTouchView: UIView {
     var changed: ((Bool) -> Void)?
+    var cancelled: (() -> Void)?
     private var heldTouches: Set<UITouch> = []
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         heldTouches.formUnion(touches); changed?(true)
@@ -397,5 +403,5 @@ private final class ArcadeTouchView: UIView {
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { cancel() }
     override func didMoveToWindow() { if window == nil { cancel() } }
-    func cancel() { heldTouches.removeAll(keepingCapacity: true); changed?(false) }
+    func cancel() { heldTouches.removeAll(keepingCapacity: true); cancelled?() }
 }

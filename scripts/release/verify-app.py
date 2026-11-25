@@ -36,4 +36,4 @@ if not model or not catalog: raise SystemExit("Pilot asset or compiled asset cat
 if info.get("ITSAppUsesNonExemptEncryption") is not False: raise SystemExit("Explicit encryption-compliance value is required")
 if not privacy or privacy.get("NSPrivacyTracking") is not False or not any(x.get("NSPrivacyAccessedAPIType")=="NSPrivacyAccessedAPICategorySystemBootTime" and "35F9.1" in x.get("NSPrivacyAccessedAPITypeReasons",[]) for x in privacy.get("NSPrivacyAccessedAPITypes",[])):
     raise SystemExit("Expected elapsed-time privacy manifest is missing")
-print(json.dumps({"bundle":"org.timelabs.moleculefoundry","version":args.version,"build":args.build,"identity_verified":True,"pilot_asset_present":True,"asset_catalog_present":True,"privacy_manifest_verified":True}))
+print(json.dumps({"bundle":"org.timelabs.moleculefoundry","version":args.version,"build":args.build,"identity_verified":True,"usesNonExemptEncryption":False,"pilot_asset_present":True,"asset_catalog_present":True,"privacy_manifest_verified":True}))

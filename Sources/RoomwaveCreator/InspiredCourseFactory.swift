@@ -17,10 +17,16 @@ public enum InspiredCourseFactory {
         }
 
         // Sixteen coarse spatial features, not image bytes or capture metadata.
-        // Binning then quantization makes identity independent of point ordering.
+        // Canonical accumulation order prevents floating-point rounding at a
+        // bin boundary from changing identity when mesh point order changes.
         var sums = [Double](repeating: 0, count: 16)
         var weights = [Double](repeating: 0, count: 16)
-        for point in normalized.points {
+        let ordered = normalized.points.sorted {
+            if $0.z != $1.z { return $0.z < $1.z }
+            if $0.x != $1.x { return $0.x < $1.x }
+            return $0.y < $1.y
+        }
+        for point in ordered {
             let bin = min(15, max(0, Int((point.z + 1) * 8)))
             let weight = 1 + min(1, abs(point.x)) * 0.25
             sums[bin] += (point.y * 0.7 + point.x * point.x * 0.3) * weight

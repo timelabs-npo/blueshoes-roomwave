@@ -44,4 +44,17 @@ final class InspiredCourseTests: XCTestCase {
             ScanSample(captureID: "bad", source: .photoDerived,
                        points: [Vector3(x: .nan, y: 0, z: 0)])))
     }
+
+    func testMeshPermutationAtQuantizationBoundaryKeepsIdentity() throws {
+        let points = [
+            Vector3(x: -1, y: 0, z: -1), Vector3(x: 1, y: 0, z: -1),
+            Vector3(x: -1, y: 0, z: 1), Vector3(x: 1, y: 0, z: 1),
+            Vector3(x: 0, y: 1, z: 0), Vector3(x: 0, y: -1, z: 0),
+            Vector3(x: 0, y: 0.021428571428571425, z: 0)
+        ]
+        let first = ScanSample(captureID: "first", source: .arkitMesh, points: points)
+        let second = ScanSample(captureID: "second", source: .arkitMesh, points: Array(points.reversed()))
+        XCTAssertEqual(try InspiredCourseFactory.make(from: first).definition,
+                       try InspiredCourseFactory.make(from: second).definition)
+    }
 }

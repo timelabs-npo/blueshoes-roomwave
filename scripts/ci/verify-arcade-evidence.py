@@ -16,6 +16,9 @@ for mode in expected:
     assert receipt["mode"] == mode
     assert receipt["bundle"] == "org.timelabs.moleculefoundry"
     assert receipt["version"] == version
+    assert isinstance(receipt["pid"], int) and receipt["pid"] > 0
+    assert isinstance(receipt["run_generation"], int) and receipt["run_generation"] > 0
+    assert receipt["capture_tick"] >= receipt["request_tick"] >= 0
     assert receipt["actual_arview_snapshot"] is True
     assert receipt["fallback_present"] is False
     assert set(receipt["renderable_layers"]) == {"Skin", "Coat", "SkeletonOverlay", "MuscleOverlay"}
@@ -30,7 +33,10 @@ for mode in expected:
         assert receipt["foot_y_at_request"] > receipt["road_y_at_request"]
     receipts.append(receipt)
 events = json.loads((args.directory / "events.json").read_text())
-kinds = {kind for event in events for kind in event["events"]}
+gameplay = [row for row in receipts if not row["mode"].startswith("home-")]
+assert len({(row["pid"], row["course_id"], row["run_generation"]) for row in gameplay}) == 1
+generation = gameplay[0]["run_generation"]
+kinds = {kind for event in events if event["run_generation"] == generation for kind in event["events"]}
 assert "takeoff" in kinds and ("landing" in kinds or "perfectLanding" in kinds)
 summary = {"version": version, "native_input_and_render_verified": True,
            "human_playtest": False, "device_performance_measured": False,
