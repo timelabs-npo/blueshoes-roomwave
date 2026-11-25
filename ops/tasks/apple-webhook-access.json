@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "task_id": "apple-webhook-access",
+  "kind": "gate",
+  "base_sha": "0f52279e465ae8ec9ebb806254f211722444236f",
+  "state": "BLOCKED_ACCESS",
+  "observed_at": "2026-11-25T17:49:50.018814Z",
+  "reason": "GET /v1/apps/6837899703/webhooks returned HTTP 403 FORBIDDEN_ERROR. No Apple webhook, HTTPS receiver or durable service is configured by this supervisor.",
+  "required_evidence": [
+    "Authorized access to the relevant App Store Connect webhook operation.",
+    "An explicitly provisioned HTTPS receiver that verifies Apple's HMAC-SHA256 signature before inspecting the event.",
+    "Persisted event and exact-build reconciliation receipts. Until then, reconcile a pending release explicitly; do not blindly poll or re-upload."
+  ],
+  "observed_evidence": {
+    "app_id": "6837899703",
+    "method": "GET",
+    "resource": "apps/6837899703/webhooks",
+    "http_status": 403,
+    "error_code": "FORBIDDEN_ERROR"
+  }
+}
