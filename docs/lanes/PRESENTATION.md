@@ -3,7 +3,8 @@
 Baseline: `0f52279e465ae8ec9ebb806254f211722444236f`, assigned branch
 `arcade-v03/presentation`. Work is restricted to this lane's three new Swift files
 and this note. No contracts, avatar helper, app composition, project settings or
-other lanes were edited. No commits, installs, workflows or native runs occurred.
+other lanes were edited. The initial worker did not commit, install, dispatch
+workflows or run native tools. Later independent reviews are recorded below.
 
 ## Implemented source
 
@@ -69,13 +70,17 @@ attached near the foot; the elliptical contact patch follows sampled road pitch 
 with separation. Native review must confirm the authored asset's scale, alignment,
 coat visibility and board contact; these were not observed here.
 
-The portrait vertical FOV is explicitly 59-63 degrees (61 with reduced motion),
-near/far planes 0.08/1600. Camera distance is 8.4-9.6 units behind the rider, with
-20-34 units of forward route lookahead. Position, aim, heading and FOV use
-`1 - exp(-rate * deltaTime)` smoothing; frame delta is bounded at 0.1 seconds.
-Vertical follow retains most of the jump elevation so the rider remains framed
-while the landing road is visible. Intended framing is lower-middle, not a top
-down track overview. Tiny turn roll and a decaying real-hit shake are bounded.
+The portrait vertical FOV is explicitly 59-63 degrees in gameplay (61 with
+reduced motion); preview fixes it at 61. Near/far planes remain 0.08/1600. Camera
+composition now has explicit preview and gameplay modes. Preview sits 6.8 units
+behind and 3.8 above the foot, aiming 0.8 forward and 0.35 above it. Gameplay sits
+8.4-9.0 behind and 5.4 above the foot, aiming 5.0-5.5 forward and 0.90 above it.
+A sample 18-24 units ahead contributes at most 0.25 units of crest lift to both
+position and aim; it no longer becomes a distant aim point. Camera offsets,
+heading and FOV use `1 - exp(-rate * deltaTime)` smoothing; frame delta is bounded
+at 0.1 seconds. The current foot's full translation is applied before offset
+smoothing, preventing speed-dependent positional lag or height-dependent loss
+of rider framing. Tiny turn roll and a decaying real-hit shake are bounded.
 Reduced motion removes shake, roll, FOV changes, preview drift and helper bob
 phase advancement, and reduces bursts/wake density; necessary follow and gameplay
 compression remain. Preview uses distance zero of the actual loaded course,
@@ -127,9 +132,10 @@ and [recursive animation stop](https://developer.apple.com/documentation/reality
 Some direct Apple pages returned JavaScript-only or inaccessible responses;
 documentation lookup is not SDK compilation evidence.
 
-No Swift/Xcode compiler, simulator, iPhone, screenshot, input capture, device
-performance measurement or playtest was available/executed. There is no native
-compile/runtime/experience PASS. Likely compile/integration risk is the exact
+At the initial worker handoff, no Swift/Xcode compiler, simulator, iPhone,
+screenshot, input capture, device performance measurement or playtest was
+available/executed. That handoff asserts no native compile/runtime/experience
+PASS. Its likely compile/integration risk was the exact
 Swift 6 / iOS 27 RealityKit SDK surface for mesh-buffer aliases, the vertical-FOV
 initializer, nested actor isolation and imported module wiring. Runtime review
 must inspect camera clearance through crests/turns, peak-jump framing, material
@@ -181,3 +187,54 @@ The smaller semantically correct rider particularly needs that framing review.
 No Swift/Xcode compiler, simulator or physical-device result is asserted by this
 review. Integration still requires real rendering of all biomes, peak jumps,
 ring/barrier/ceiling decisions, return-home/retry, and reduced-motion behavior.
+
+## Camera correction after actual native capture
+
+Correction baseline: `03ae2106b6be4c4ed584a3363c2e20d68c590ed4`, isolated branch
+`fix/arcade-camera-composition`. Only `ArcadeSceneController.swift` and this note
+changed. The coordinator supplied real native screenshots extracted from failed
+CI run `45678649494` at the integrated `e7f6468` revision. The reviewer inspected
+the actual Neon Dawn home (`813d99dbde2fb82aed8d.png`), Low Orbit home
+(`b7235741d71440fbd104.png`) and paused scene (`04e744b73037c3b49275.png`). These
+showed the bundled rider behind the home controls near the screen bottom and
+excess empty sky. The paused scene also showed the old distant aim. They are
+evidence of the previous camera's problem, not screenshots of this correction.
+
+The correction separates preview/gameplay composition even when reduced motion
+sets preview drift to zero. It replaces the old 20-34-unit weighted aim with a
+near aim and bounded crest lift. Preview's low aim leaves room for the board's
+rear tip on the opening uphill. Gameplay maintains the rider's absolute foot
+translation before smoothing relative offsets: otherwise smoothing world
+positions creates several units of unintended trailing distance at speed.
+The same full vertical translation applies to position and aim through a jump.
+The new follow-origin cache resets on teardown, retry rewind and return to
+preview, alongside the existing camera caches. Asset scale remains 1.0 and no
+physics, collision bands, mesh, material, lighting, UI or evidence hook changed.
+
+A local mathematical perspective-projection sweep used the three authored
+catalogues' actual 12-unit samples and linear pose interpolation. It evaluated
+30/60/120 Hz offset smoothing at speeds 12/21/30, the portrait 1320:2868 aspect,
+the real opening ramp pitches, home drift extrema, and a constructed continuous
+0-16-unit foot-height sweep. This was a camera calculation, not a gameplay run
+or a rendered image. Screen Y is normalized from top (0) to bottom (1):
+
+| Projected point | Neon Dawn | Low Orbit | Black Current |
+| --- | --- | --- | --- |
+| Preview pitched body midpoint, including drift | 0.5256-0.5260 | 0.5275-0.5280 | 0.5268-0.5272 |
+| Preview foot | 0.5705-0.5710 | 0.5705-0.5710 | 0.5705-0.5710 |
+| Gameplay body midpoint across sweep | 0.6609-0.6928 | 0.6601-0.6997 | 0.6604-0.6973 |
+| Gameplay foot across sweep | 0.6992-0.7270 | 0.6992-0.7320 | 0.6992-0.7303 |
+
+The preview board's rear centre projected at 0.6166-0.6211 across all three
+openings, close to the start of the course selector; its final UI clearance
+still needs native inspection. Sampled road 20 units ahead projected at
+0.2696-0.8649 and 40 units ahead at 0.1783-0.6932 across the constructed flight
+sweep, so those sample points remained within the vertical viewport. This does
+not prove terrain/encounter occlusion, asset pose, text clearance or frame rate.
+
+Executed: source/lifecycle review, the projection calculation and
+`git diff --check`. This correction has not been compiled or rendered locally.
+Next gate: capture the real updated home/play/retry views in all three biomes;
+check the rider and full board above home controls, landings through crests,
+ceiling/barrier occlusion behind the rider, peak jumps and reduced motion. The
+coordinator owns the separate home interruption-message correction and native CI.

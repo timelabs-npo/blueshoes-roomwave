@@ -22,6 +22,8 @@ enum ArcadeSceneError: LocalizedError {
 final class ArcadeSceneController: ArcadeSceneDriving {
     var view: UIView { arView }
 
+    private enum CameraMode { case preview, gameplay }
+
     private let arView: ARView
     private let camera = PerspectiveCamera()
     private var anchor: AnchorEntity?
@@ -44,6 +46,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
     private var lastRenderedDistance: Double = 0
     private var cameraPosition: SIMD3<Float>?
     private var cameraTarget: SIMD3<Float>?
+    private var cameraFollowOrigin: SIMD3<Float>?
     private var cameraHeading = SIMD3<Float>(0, 0, -1)
     private var riderHeading = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
     private var fieldOfView: Float = 61
@@ -216,7 +219,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         updateEncounters(distance: state.distance, cursor: state.encounterCursor)
         updateGhost(ghost, course: course)
         followCamera(foot: foot, road: road, forward: flatForward, distance: state.distance,
-                     speed: speedFraction, separation: separation, dt: dt,
+                     speed: speedFraction, mode: .gameplay, dt: dt,
                      reducedMotion: reducedMotion, snap: snap, previewOffset: 0)
         previousTick = state.tick
         lastRenderedDistance = state.distance
@@ -247,8 +250,8 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         // Bounded home drift only. No orbit when reduced motion is requested.
         let elapsed = time.isFinite ? time.truncatingRemainder(dividingBy: 40) : 0
         let drift = reducedMotion ? Float(0) : sin(Float(elapsed) * (.pi / 20)) * 0.7
-        followCamera(foot: road, road: road, forward: forward, distance: 0, speed: 0.35,
-                     separation: 0, dt: 1 / 60, reducedMotion: reducedMotion,
+        followCamera(foot: road, road: road, forward: forward, distance: 0, speed: 0,
+                     mode: .preview, dt: 1 / 60, reducedMotion: reducedMotion,
                      snap: true, previewOffset: drift)
         wasPreview = true
     }
@@ -276,6 +279,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         lastRenderedDistance = 0
         cameraPosition = nil
         cameraTarget = nil
+        cameraFollowOrigin = nil
         cameraHeading = SIMD3(0, 0, -1)
         riderHeading = simd_quatf(angle: 0, axis: SIMD3(0, 1, 0))
         fieldOfView = 61
@@ -286,29 +290,45 @@ final class ArcadeSceneController: ArcadeSceneDriving {
     }
 
     private func followCamera(foot: SIMD3<Float>, road: SIMD3<Float>, forward: SIMD3<Float>,
-                              distance: Double, speed: Float, separation: Float, dt: Float,
+                              distance: Double, speed: Float, mode: CameraMode, dt: Float,
                               reducedMotion: Bool, snap: Bool, previewOffset: Float) {
         guard let course else { return }
-        // Frame the rider low in portrait and keep 20–34 m of road in view. The
-        // target follows flight enough to keep the rider in frame, without looking
-        // down from an overview. Lookahead elevation anticipates crests/landings.
-        let lookahead = course.pose(at: min(course.length, distance + 20 + Double(speed) * 14))
+        // Home controls begin below the scene's centre: give the metre-high rider
+        // its own space above them. Gameplay leaves more road above the rider for
+        // reading rings, roofs and landings. Preview is explicit even with no drift.
+        let isPreview = mode == .preview
+        let back: Float = isPreview ? 6.8 : 8.4 + speed * 0.6
+        let height: Float = isPreview ? 3.8 : 5.4
+        let aimForward: Float = isPreview ? 0.8 : 5.0 + speed * 0.5
+        // The low preview aim also gives the board's rear tip room above the
+        // course selector on the opening uphill, without enlarging the avatar.
+        let aimHeight: Float = isPreview ? 0.35 : 0.90
+        let lookahead = course.pose(at: min(course.length, distance + 18 + Double(speed) * 6))
         let ahead = ArcadeGeometry.vector(lookahead.center)
+        // Distant elevation may lift the rig slightly, never become its aim point.
+        // The previous distant weighted target pushed the rider behind home UI.
+        let crestLift: Float = isPreview ? 0 : min(0.25, max(0, ahead.y - road.y) * 0.06)
         cameraHeading = snap ? forward : ArcadeGeometry.normalized(
             cameraHeading + (forward - cameraHeading) * smoothing(7, dt), fallback: forward)
         let right = simd_cross(cameraHeading, SIMD3<Float>(0, 1, 0))
-        let lift = separation * 0.92
-        let desiredPosition = road - cameraHeading * (8.4 + speed * 1.2) +
-            SIMD3<Float>(0, 4.0 + lift + max(0, ahead.y - road.y) * 0.15, 0) + right * previewOffset
-        // A shorter aim vector than the visibility distance keeps the rider's body
-        // around the lower-middle of the image, with the real landing area ahead.
-        let desiredTarget = road * 0.57 + ahead * 0.43 + SIMD3<Float>(0, 1.9 + separation * 0.88, 0)
+        // Both offsets follow the actual foot in flight. The course remains below
+        // the rider instead of a capped vertical follow letting peak jumps escape.
+        let desiredPosition = foot - cameraHeading * back +
+            SIMD3<Float>(0, height + crestLift, 0) + right * previewOffset
+        let desiredTarget = foot + cameraHeading * aimForward +
+            SIMD3<Float>(0, aimHeight + crestLift, 0)
+        // Smooth offsets in the rider's travelling frame. Smoothing old world
+        // positions alone adds speed/rate metres of lag and changes composition.
+        let travel = snap ? SIMD3<Float>.zero : foot - (cameraFollowOrigin ?? foot)
+        let previousPosition = (cameraPosition ?? desiredPosition) + travel
+        let previousTarget = (cameraTarget ?? desiredTarget) + travel
         let moveAlpha = smoothing(7.5, dt)
         let aimAlpha = smoothing(9, dt)
-        let position = snap ? desiredPosition : (cameraPosition ?? desiredPosition) + (desiredPosition - (cameraPosition ?? desiredPosition)) * moveAlpha
-        let target = snap ? desiredTarget : (cameraTarget ?? desiredTarget) + (desiredTarget - (cameraTarget ?? desiredTarget)) * aimAlpha
+        let position = snap ? desiredPosition : previousPosition + (desiredPosition - previousPosition) * moveAlpha
+        let target = snap ? desiredTarget : previousTarget + (desiredTarget - previousTarget) * aimAlpha
         cameraPosition = position
         cameraTarget = target
+        cameraFollowOrigin = foot
         var shake = SIMD3<Float>.zero
         if !reducedMotion, hitImpulse > 0.005 {
             shake = right * sin(eventAge * 61) * hitImpulse * 0.09 + SIMD3(0, cos(eventAge * 47) * hitImpulse * 0.045, 0)
@@ -318,7 +338,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
             let bank = max(-0.025, min(0.025, signedTurn(from: cameraHeading, to: forward) * 0.12))
             camera.orientation = camera.orientation * simd_quatf(angle: bank, axis: SIMD3(0, 0, 1))
         }
-        let desiredFOV: Float = reducedMotion ? 61 : 59 + speed * 4
+        let desiredFOV: Float = reducedMotion || isPreview ? 61 : 59 + speed * 4
         fieldOfView = snap || reducedMotion ? desiredFOV : fieldOfView + (desiredFOV - fieldOfView) * smoothing(2.5, dt)
         camera.camera.fieldOfViewInDegrees = fieldOfView
         // Sky follows translation only, preserving a fixed world horizon/orbit axis.
@@ -374,6 +394,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         hitImpulse = 0
         cameraPosition = nil
         cameraTarget = nil
+        cameraFollowOrigin = nil
     }
 
     private func updateGhost(_ state: SurfState?, course: CompiledSurfCourse) {
