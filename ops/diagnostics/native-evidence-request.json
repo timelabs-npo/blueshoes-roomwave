@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "repository": "timelabs-npo/blueshoes-roomwave",
+  "run_id": 45729132932,
+  "run_attempt": 1,
+  "source_sha": "81a92749d5b08ad2c525db9e45715051604d7eec",
+  "tree_sha": "3eb06083436a3aabc169dda0a544215f6ebc407e",
+  "artifact_id": 15076946459,
+  "artifact_name": "roomwave-native-review",
+  "size_bytes": 18399086,
+  "sha256": "c1ad6f3a78f1f0d1102efe32fe597f75a0f2bf6d68fd2c392de26b68b74ee701"
+}
