@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Inspect two pinned native artifacts without changing their original bytes."""
-import base64, hashlib, io, json, os, re, signal, stat, sys, time, urllib.error, urllib.parse, urllib.request, zipfile
+import base64, hashlib, io, json, os, re, signal, stat, sys, tempfile, time, urllib.error, urllib.parse, urllib.request, zipfile
 from pathlib import Path, PurePosixPath
 
 REPO = "timelabs-npo/blueshoes-roomwave"
 PINS = {
-    45729132932: ("81a92749d5b08ad2c525db9e45715051604d7eec", "3eb06083436a3aabc169dda0a544215f6ebc407e", 15076946459, 18399086, "c1ad6f3a78f1f0d1102efe32fe597f75a0f2bf6d68fd2c392de26b68b74ee701"),
-    45729709518: ("1fa4d86072734bacbc3e6a8c66ff310033fdb9b3", "cf7d08cffb85a242ae5784c3988dc9b8b300224e", 15076614755, 4577229, "bde5a6dd8b9c58864cfcada6d0e4b2c51f5950c858b5c0bd36e25bcda362fc2a"),
+    15076946459: [45729132932,"81a92749d5b08ad2c525db9e45715051604d7eec","3eb06083436a3aabc169dda0a544215f6ebc407e","roomwave-native-review",18399086,"c1ad6f3a78f1f0d1102efe32fe597f75a0f2bf6d68fd2c392de26b68b74ee701"],
+    15076614755: [45729709518,"1fa4d86072734bacbc3e6a8c66ff310033fdb9b3","cf7d08cffb85a242ae5784c3988dc9b8b300224e","roomwave-native-review",4577229,"bde5a6dd8b9c58864cfcada6d0e4b2c51f5950c858b5c0bd36e25bcda362fc2a"],
+    15076488863: [45729132932,"81a92749d5b08ad2c525db9e45715051604d7eec","3eb06083436a3aabc169dda0a544215f6ebc407e","roomwave-arcade-evidence",485855549,"baeeb54cbe43401507a8201aab2cca36c8746492de0462fd1de4a8238b13207d"],
 }
 DEADLINE, OUTPUT = time.monotonic() + 150, 0
 class Blocked(Exception): pass
@@ -53,19 +54,27 @@ def allowed(url):
             and not parsed.password and not parsed.fragment and
             (bool(re.fullmatch(r"productionresultssa[0-9]+\.blob\.core\.windows\.net", host))
              or host in {"objects.githubusercontent.com", "pipelines.actions.githubusercontent.com", "results-receiver.actions.githubusercontent.com"}))
-def download(url, expected):
+def download(url, expected, digest):
+    require(expected <= 536870912, "download_expected_size")
     for hop in range(4):
         require(allowed(url), "download_host_not_allowlisted")
         try:
             with OPENER.open(urllib.request.Request(url), timeout=remaining()) as response:
                 length = response.headers.get("Content-Length")
                 require(length is None or int(length) == expected, "download_content_length")
-                chunks, size = [], 0
-                while True:
-                    remaining(); chunk = response.read(65536)
-                    if not chunk: return b"".join(chunks)
-                    size += len(chunk); require(size <= expected and size <= 33554432, "download_size")
-                    chunks.append(chunk)
+                output, size, hasher = tempfile.TemporaryFile(), 0, hashlib.sha256()
+                try:
+                    while True:
+                        remaining(); chunk = response.read(1048576)
+                        if not chunk: break
+                        size += len(chunk); require(size <= expected, "download_size")
+                        hasher.update(chunk); output.write(chunk)
+                    require(size == expected and hasher.hexdigest() == digest, "artifact_bytes_digest")
+                    output.seek(0)
+                    return output
+                except BaseException:
+                    output.close()
+                    raise
         except urllib.error.HTTPError as error:
             if error.code not in (301, 302, 303, 307, 308): raise Blocked("download_http_" + str(error.code)) from None
             url = urllib.parse.urljoin(url, error.headers.get("Location", ""))
@@ -74,12 +83,13 @@ def main():
     require(len(sys.argv) == 2, "request_argument")
     path = Path(sys.argv[1])
     require(path.parent == Path("ops/diagnostics") and path.suffix == ".json" and not path.is_symlink() and path.stat().st_size <= 4096, "request_path")
-    request = json.loads(path.read_text()); pin = PINS.get(request.get("run_id"))
-    require(pin is not None, "unapproved_run")
-    source, tree, artifact_id, size, digest = pin
-    expected = dict(schema_version=1, repository=REPO, run_id=request["run_id"], run_attempt=1,
+    request = json.loads(path.read_text()); pin = PINS.get(request.get("artifact_id"))
+    require(pin is not None, "unapproved_artifact")
+    run_id, source, tree, artifact_name, size, digest = pin
+    artifact_id = request["artifact_id"]
+    expected = dict(schema_version=1, repository=REPO, run_id=run_id, run_attempt=1,
                     source_sha=source, tree_sha=tree, artifact_id=artifact_id,
-                    artifact_name="roomwave-native-review", size_bytes=size, sha256=digest)
+                    artifact_name=artifact_name, size_bytes=size, sha256=digest)
     require(set(request) == set(expected) and all(type(request[k]) is type(v) and request[k] == v for k, v in expected.items()), "request_pin_mismatch")
     prefix = "/repos/" + REPO
     run = api(prefix + "/actions/runs/" + str(request["run_id"]))
@@ -90,16 +100,15 @@ def main():
     require(artifact["id"] == artifact_id and artifact["name"] == expected["artifact_name"] and not artifact["expired"], "artifact_identity")
     require(artifact["workflow_run"]["id"] == request["run_id"] and artifact["workflow_run"]["head_sha"] == source, "artifact_run")
     require(artifact["size_in_bytes"] == size and artifact.get("digest") == "sha256:" + digest, "artifact_metadata_digest")
-    data = download(api(prefix + "/actions/artifacts/" + str(artifact_id) + "/zip", True), size)
-    require(len(data) == size and hashlib.sha256(data).hexdigest() == digest, "artifact_bytes_digest")
-    archive = zipfile.ZipFile(io.BytesIO(data)); infos = archive.infolist()
-    require(len(infos) <= 2000 and sum(x.file_size for x in infos) <= 134217728, "zip_total_bounds")
+    data = download(api(prefix + "/actions/artifacts/" + str(artifact_id) + "/zip", True), size, digest)
+    archive = zipfile.ZipFile(data); infos = archive.infolist()
+    require(len(infos) <= 2000 and sum(x.file_size for x in infos) <= 805306368, "zip_total_bounds")
     names, folded = {}, set()
     for entry in infos:
         remaining()
         name, mode = entry.filename, entry.external_attr >> 16
         require(entry.orig_filename == name and name and len(name) <= 512 and not name.startswith("/") and "\\" not in name and ":" not in name and "\0" not in name and ".." not in PurePosixPath(name).parts, "zip_path")
-        require(name.casefold() not in folded and not entry.flag_bits & 1 and entry.file_size <= 33554432, "zip_member_bounds")
+        require(name.casefold() not in folded and not entry.flag_bits & 1 and entry.file_size <= 536870912, "zip_member_bounds")
         require(not stat.S_ISLNK(mode) and stat.S_IFMT(mode) in (0, stat.S_IFREG, stat.S_IFDIR), "zip_member_type")
         names[name] = entry; folded.add(name.casefold())
     def one(basename):
@@ -141,9 +150,27 @@ def main():
                 stages.append(row)
             previous = state
         emit({"entry": name, "total_records": len(rows), "records": chosen, "stage_transitions": stages[:200], "stage_transitions_total": len(stages)})
+    for name in sorted(names):
+        if "metal-diagnostics/" not in name or not name.endswith(".ips"): continue
+        raw = text(name, 4194304).lstrip()
+        decoder = json.JSONDecoder()
+        first, offset = decoder.raw_decode(raw)
+        rest = raw[offset:].lstrip()
+        report = decoder.raw_decode(rest)[0] if rest else first
+        details = {key: report.get(key) for key in ("procName", "pid", "parentProc", "parentPid", "captureTime", "exception", "termination", "asi", "faultingThread")}
+        threads = report.get("threads") or []
+        fault = report.get("faultingThread")
+        details["faulting_frames"] = threads[fault].get("frames", [])[:20] if type(fault) is int and 0 <= fault < len(threads) else []
+        details["images"] = [{"name": x.get("name"), "index": i} for i, x in enumerate(report.get("usedImages") or [])]
+        emit({"entry": name, "sha256": hashlib.sha256(archive.read(name)).hexdigest(), "report": details})
     native = one("native-test.log")
     pattern = re.compile(r"XActivityClientTests|Test (?:Case|Suite)|Executed \d|TEST (?:SUCCEEDED|FAILED)|error:|GPU|METAL|SimMetalHost|Compiler failed|renderPipeline|render.target|Critical process|not running|Timed out|timeout", re.I)
-    hits = [(i + 1, line[:650]) for i, line in enumerate(text(native, 33554432).splitlines()) if pattern.search(line)]
+    native_lines = text(native, 33554432).splitlines()
+    hits = [(i + 1, line[:650]) for i, line in enumerate(native_lines) if pattern.search(line)]
+    ui_start = next((i for i, line in enumerate(native_lines) if "Test Case '-[RoomwaveUITests.ArcadeFlowUITests" in line and "started." in line), None)
+    if ui_start is not None:
+        ui_end = next((i for i in range(ui_start + 1, len(native_lines)) if "Test Case '-[RoomwaveUITests.ArcadeFlowUITests" in native_lines[i] and ("passed (" in native_lines[i] or "failed (" in native_lines[i])), min(ui_start + 249, len(native_lines) - 1))
+        emit({"ui_test_lines": [(i + 1, native_lines[i][:650]) for i in range(ui_start, min(ui_end + 1, ui_start + 250))]})
     chosen = hits if len(hits) <= 180 else hits[:75] + hits[-105:]
     emit({"xactivity_test_lines": [row for row in hits if "XActivityClientTests" in row[1]][:60]})
     emit({"entry": native, "matching_lines": len(hits), "omitted_matching_lines": len(hits)-len(chosen), "lines": chosen})
@@ -162,7 +189,7 @@ def main():
             for value in node: walk(value, parent)
     for name, value in manifests: walk(value, name)
     used = set()
-    for label, expression in [("home", r"01-home|home-neon|home-dawn"), ("play", r"04-release-and-air|08-immediate-retry|05-landing|airborne|charged|real-hold|real-long-press")]:
+    for label, expression in [("home", r"01-home|home-neon|home-dawn"), ("play", r"04-release-and-air")]:
         match = next(((description, name) for description, name in candidates if name not in used and re.search(expression, description, re.I)), None)
         if not match: emit({"preview": label, "omitted": "no_matching_UI_attachment"}); continue
         description, name = match; original = archive.read(name); image = Image.open(io.BytesIO(original))

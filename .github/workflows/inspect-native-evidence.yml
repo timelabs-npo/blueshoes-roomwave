@@ -27,8 +27,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: old-avatar-81a9274
-            request: ops/diagnostics/native-evidence-request.json
+          - label: old-avatar-full-81a9274
+            request: ops/diagnostics/native-full-evidence-request.json
           - label: x-release-fixes-1fa4d86
             request: ops/diagnostics/pr7-native-evidence-request.json
     name: Inspect ${{ matrix.label }}
