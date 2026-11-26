@@ -27,6 +27,7 @@ record = {
     'started_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
     'source_sha': os.environ.get('GITHUB_SHA') or subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
     'run_id': os.environ.get('GITHUB_RUN_ID'),
+    'invocation_id': str(uuid4()),
     'purpose': 'diagnostic-runtime-comparison' if os.environ.get('ROOMWAVE_DIAGNOSTIC_RUNTIME') else 'sdk-matched-native-gate',
     'requested_runtime': os.environ.get('ROOMWAVE_DIAGNOSTIC_RUNTIME') or None,
 }
@@ -58,7 +59,24 @@ PY
 python3 scripts/ci/run-bounded.py --seconds 240 --label simulator-boot -- xcrun simctl boot "$ROOMWAVE_SIMULATOR_ID" >/dev/null 2>&1 || true
 python3 scripts/ci/run-bounded.py --seconds 240 --label simulator-ready -- xcrun simctl bootstatus "$ROOMWAVE_SIMULATOR_ID" -b
 mkdir -p build/release/evidence
+collect_capture_evidence() {
+  local app_data lookup_status
+  local -a capture_arguments
+  capture_arguments=(
+    --checkpoint-dir build/release/evidence/live-diagnostics/capture-checkpoints
+    --output-dir build/release/evidence --run-receipt build/release/native-run-start.json
+    --simulator "$ROOMWAVE_SIMULATOR_ID" --receipt build/release/evidence-collection.json
+  )
+  if python3 scripts/ci/arcade-capture-checkpoint.py "${capture_arguments[@]}"; then return 0; fi
+  lookup_status=0
+  app_data="$(python3 scripts/ci/run-bounded.py --seconds 30 --label native-app-container -- xcrun simctl get_app_container "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry data 2>build/release/container.log)" || lookup_status=$?
+  python3 scripts/ci/arcade-capture-checkpoint.py "${capture_arguments[@]}" \
+    --lookup-exit "$lookup_status" --fresh-container "$app_data"
+}
 collect_native_diagnostics() {
+  local capture_status=0
+  # Preserve the already-observed bytes before slow screenshots/attachments/Metal collection.
+  collect_capture_evidence || capture_status=$?
   git rev-parse HEAD > build/release/evidence/source-sha.txt
   python3 scripts/ci/run-bounded.py --seconds 30 --label simulator-description -- xcrun simctl list devices "$ROOMWAVE_SIMULATOR_ID" > build/release/evidence/simulator.txt 2>build/release/simulator-description.log || true
   python3 scripts/ci/run-bounded.py --seconds 60 --label final-screenshot -- xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/release/evidence/Roomwave-full-ui.png >build/release/screenshot.log 2>&1 || true
@@ -70,17 +88,14 @@ collect_native_diagnostics() {
     python3 scripts/ci/collect-metal-diagnostics.py \
       --since-receipt build/release/native-run-start.json --simulator "$ROOMWAVE_SIMULATOR_ID" \
       --output-dir build/release/evidence/metal-diagnostics >build/release/metal-diagnostics.log 2>&1 || true
-  local app_data
-  app_data="$(python3 scripts/ci/run-bounded.py --seconds 30 --label native-app-container -- xcrun simctl get_app_container "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry data 2>build/release/container.log)" || return 0
-  if [[ -d "$app_data/Library/Caches/RoomwaveArcadeCaptures" ]]; then
-    cp -R "$app_data/Library/Caches/RoomwaveArcadeCaptures/." build/release/evidence/ || true
-  fi
+  return "$capture_status"
 }
 python3 scripts/ci/watch-arcade-recording.py --simulator "$ROOMWAVE_SIMULATOR_ID" \
   --output build/release/evidence/Roomwave-actual-ui-test.mp4 >build/release/recording-observer.log 2>&1 &
 ROOMWAVE_CAPTURE_PID=$!
 python3 scripts/ci/watch-arcade-diagnostics.py --simulator "$ROOMWAVE_SIMULATOR_ID" \
-  --output-dir build/release/evidence/live-diagnostics --seconds 1800 >build/release/diagnostic-observer.log 2>&1 &
+  --output-dir build/release/evidence/live-diagnostics --seconds 1800 \
+  --run-receipt build/release/native-run-start.json >build/release/diagnostic-observer.log 2>&1 &
 ROOMWAVE_DIAGNOSTIC_PID=$!
 stop_observers() {
   local pid running
@@ -100,7 +115,7 @@ if ! python3 scripts/ci/run-bounded.py --seconds 1260 --label native-tests -- xc
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test > build/release/native-test.log 2>&1; then
   stop_observers
   trap - EXIT
-  collect_native_diagnostics
+  collect_native_diagnostics || true
   tail -n 120 build/release/native-test.log
   exit 1
 fi

@@ -3,6 +3,11 @@ name: Unsigned iOS readiness
 on:
   workflow_dispatch:
     inputs:
+      runner_class:
+        description: GPU XLarge is billable and requires organization access; standard remains the default
+        type: choice
+        options: [standard, gpu]
+        default: standard
       runtime_version:
         description: Simulator runtime (27.0 is a diagnostic comparison, not the release gate)
         type: choice
@@ -27,7 +32,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: unsigned-ios-${{ github.ref }}-${{ inputs.runtime_version || 'sdk-matched' }}
+  group: unsigned-ios-${{ github.ref }}-${{ inputs.runtime_version || 'sdk-matched' }}-${{ inputs.runner_class || 'standard' }}
   cancel-in-progress: true
 
 jobs:
@@ -37,7 +42,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association))
-    runs-on: xcode-27
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.runner_class == 'gpu' && 'xcode-27-xlarge' || 'xcode-27' }}
     # Individual native/boot/archive limits total up to 49 minutes. Leave room
     # for bounded diagnostics and the artifact steps when one limit is reached.
     timeout-minutes: 65
@@ -52,6 +57,12 @@ jobs:
           X_OAUTH_CLIENT_ID: ${{ vars.X_OAUTH_CLIENT_ID }}
       - name: Select stable Xcode 27.2
         run: bash scripts/release/select-xcode.sh
+      - name: Record actual Metal device capabilities
+        timeout-minutes: 2
+        run: |
+          mkdir -p build
+          xcrun swift scripts/ci/metal-inventory.swift > build/runner-metal.json
+          cat build/runner-metal.json
       - name: Install project generator if needed
         timeout-minutes: 6
         run: command -v xcodegen >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
@@ -60,6 +71,14 @@ jobs:
         run: bash scripts/release/validate-native.sh
         env:
           ROOMWAVE_DIAGNOSTIC_RUNTIME: ${{ inputs.runtime_version == '27.0' && '27.0' || '' }}
+      - name: Preserve runner inventory beside native receipts
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if [[ -f build/runner-metal.json ]]; then
+            mkdir -p build/release
+            cp build/runner-metal.json build/release/runner-metal.json
+          fi
       - name: Preserve lightweight native review evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -82,8 +101,12 @@ jobs:
             build/release/native-run-start.json
             build/release/simulator-selection.json
             build/release/native-test.log
+            build/release/runner-metal.json
             build/release/metal-diagnostics.log
             build/release/diagnostic-observer.log
+            build/release/container.log
+            build/release/attachments-export.log
+            build/release/evidence-collection.json
             build/release/recording-observer.log
       - name: Preserve playable evidence and unsigned simulator app
         if: always()

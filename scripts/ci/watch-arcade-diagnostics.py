@@ -7,6 +7,7 @@ macOS supplies xcrun, ps and sample. Only subprocesses created here are stopped.
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,10 @@ import uuid
 BUNDLE = "org.timelabs.moleculefoundry"
 TRACE = Path("Library/Caches/RoomwaveArcadeCaptures/diagnostics.json")
 TOLERANCE = 3.0
+_CHECKPOINT_SPEC = importlib.util.spec_from_file_location(
+    "arcade_capture_checkpoint", Path(__file__).with_name("arcade-capture-checkpoint.py"))
+_CHECKPOINTS = importlib.util.module_from_spec(_CHECKPOINT_SPEC)
+_CHECKPOINT_SPEC.loader.exec_module(_CHECKPOINTS)
 
 
 def utc():
@@ -90,7 +95,7 @@ def read_trace(path, watcher_started, now):
 
 
 class Observer:
-    def __init__(self, simulator, output, seconds):
+    def __init__(self, simulator, output, seconds, context=None):
         self.simulator = simulator
         self.output = output
         self.started = time.time()
@@ -103,6 +108,15 @@ class Observer:
         self.last_trace = None
         self.sampled = set()
         self.events = output / "observer.jsonl"
+        capture_context = context if context is not None else {
+            "source_sha": os.environ.get("GITHUB_SHA"), "run_id": os.environ.get("GITHUB_RUN_ID"),
+            "simulator": simulator}
+        self.checkpoints = _CHECKPOINTS.Checkpoints(output / "capture-checkpoints",
+                                                   capture_context, self.started)
+        self.capture_paths = None
+        self.capture_identity = None
+        self.capture_proof = None
+        self.capture_pairs = None
 
     def emit(self, event, **fields):
         record = {"at": utc(), "event": event, **fields}
@@ -205,6 +219,36 @@ class Observer:
                 "executable_path_sha256": hashlib.sha256(
                     executable.encode("utf-8")).hexdigest()}
 
+    def preserve_captures(self, paths, trace, allow_proof=True):
+        launch = (trace["pid"], trace["launch_id"], trace["started_at"])
+        try:
+            self.checkpoints.note(trace)
+            if launch != self.current:
+                # A newer launch seen during final file-only collection invalidates
+                # the older selection even though no new process proof is allowed.
+                return
+            if launch != self.capture_identity:
+                if not allow_proof or self.stopping:
+                    return
+                proof = self.proof(trace["pid"], paths["app"])
+                fresh = read_trace(paths["data"] / TRACE, self.started, time.time())
+                if proof is None or fresh is None or (
+                        fresh["pid"], fresh["launch_id"], fresh["started_at"]) != launch:
+                    return
+                self.capture_identity, self.capture_proof = launch, proof
+            manifest = self.checkpoints.capture(paths["data"] / TRACE.parent, trace, self.capture_proof,
+                seconds=4 if allow_proof else 2, cancelled=lambda: self.stopping and allow_proof)
+            self.capture_paths = dict(paths)
+            pairs = tuple(mode for mode in _CHECKPOINTS.MODES
+                          if mode + ".json" in manifest["files"] and mode + ".png" in manifest["files"])
+            if (launch, pairs) != self.capture_pairs:
+                self.capture_pairs = (launch, pairs)
+                self.emit("capture_checkpoint", pid=trace["pid"], launch_id=trace["launch_id"],
+                          modes=list(pairs), original_bytes=True)
+        except (OSError, ValueError, TypeError, KeyError, _CHECKPOINTS.Rejected) as error:
+            self.emit("capture_checkpoint_error",
+                      reason=str(error) if isinstance(error, _CHECKPOINTS.Rejected) else "checkpoint_io_error")
+
     def observe(self):
         # Refresh on every observation: XCTest can reinstall between hosted/UI tests.
         paths = self.containers()
@@ -228,6 +272,8 @@ class Observer:
         if trace != self.last_trace:
             self.emit("trace_observed", trace=trace)
             self.last_trace = trace
+        # Reuse this already-resolved container. Only a new launch needs one ps proof.
+        self.preserve_captures(paths, trace)
         reason = None
         age = None
         heartbeat = trace["heartbeat_at"]
@@ -283,6 +329,11 @@ class Observer:
             raise
         finally:
             self.stop()
+            # Final file-only checkpoint: never ask simctl to rediscover a dying app.
+            if self.capture_paths is not None and time.monotonic() < self.deadline:
+                fresh = read_trace(self.capture_paths["data"] / TRACE, self.started, time.time())
+                if fresh is not None:
+                    self.preserve_captures(self.capture_paths, fresh, allow_proof=False)
             self.emit("observer_end", status=outcome,
                       samples=len(self.sampled))
 
@@ -292,6 +343,7 @@ def main():
     parser.add_argument("--simulator", required=True)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--seconds", type=float, default=1800)
+    parser.add_argument("--run-receipt", type=Path)
     args = parser.parse_args()
     try:
         uuid.UUID(args.simulator)
@@ -299,7 +351,11 @@ def main():
         parser.error("--simulator must be a UUID")
     if not 0 < args.seconds <= 1800:
         parser.error("--seconds must be greater than zero and at most 1800")
-    observer = Observer(args.simulator, args.output_dir, args.seconds)
+    context = None
+    if args.run_receipt is not None:
+        start = json.loads(_CHECKPOINTS.read_bytes(args.run_receipt, 65536)[0])
+        context = _CHECKPOINTS.run_context(start, args.simulator)
+    observer = Observer(args.simulator, args.output_dir, args.seconds, context=context)
     signal.signal(signal.SIGTERM, observer.stop)
     signal.signal(signal.SIGINT, observer.stop)
     observer.run()
