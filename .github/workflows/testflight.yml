@@ -3,6 +3,11 @@ name: Roomwave TestFlight pilot
 on:
   workflow_dispatch:
     inputs:
+      runner_class:
+        description: GPU XLarge is billable; use only after organization access and budget are confirmed
+        type: choice
+        options: [standard, gpu]
+        default: standard
       expected_sha:
         description: Exact reviewed main commit to validate and release
         type: string
@@ -26,7 +31,7 @@ concurrency:
 jobs:
   validate:
     if: github.ref == 'refs/heads/main'
-    runs-on: xcode-27
+    runs-on: ${{ inputs.runner_class == 'gpu' && 'xcode-27-xlarge' || 'xcode-27' }}
     # Preserve evidence even when bounded native work approaches its own caps.
     timeout-minutes: 65
     steps:
@@ -43,6 +48,12 @@ jobs:
           X_OAUTH_CLIENT_ID: ${{ vars.X_OAUTH_CLIENT_ID }}
       - name: Select stable Xcode 27.2
         run: bash scripts/release/select-xcode.sh
+      - name: Record actual Metal device capabilities
+        timeout-minutes: 2
+        run: |
+          mkdir -p build
+          xcrun swift scripts/ci/metal-inventory.swift > build/runner-metal.json
+          cat build/runner-metal.json
       - name: Install project generator
         run: command -v xcodegen >/dev/null || brew install xcodegen
       - name: Validate arcade rules, real touch flow and native rendering
@@ -73,6 +84,7 @@ jobs:
             build/release/native-run-start.json
             build/release/simulator-selection.json
             build/release/native-test.log
+            build/runner-metal.json
             build/release/metal-diagnostics.log
             build/release/diagnostic-observer.log
             build/release/recording-observer.log
@@ -92,7 +104,7 @@ jobs:
   release:
     needs: validate
     if: github.ref == 'refs/heads/main' && (inputs.export_ipa || inputs.upload)
-    runs-on: xcode-27
+    runs-on: ${{ inputs.runner_class == 'gpu' && 'xcode-27-xlarge' || 'xcode-27' }}
     timeout-minutes: 45
     environment: testflight
     env:
@@ -110,6 +122,12 @@ jobs:
           X_OAUTH_CLIENT_ID: ${{ vars.X_OAUTH_CLIENT_ID }}
       - name: Select stable Xcode 27.2
         run: bash scripts/release/select-xcode.sh
+      - name: Record actual Metal device capabilities
+        timeout-minutes: 2
+        run: |
+          mkdir -p build
+          xcrun swift scripts/ci/metal-inventory.swift > build/runner-metal.json
+          cat build/runner-metal.json
       - name: Install project generator
         run: command -v xcodegen >/dev/null || brew install xcodegen
       - name: Allocate this exact release once
@@ -192,4 +210,5 @@ jobs:
             build/release/*.json
             build/release/*.log
             build/release/testflight-operations/*.json
+            build/runner-metal.json
             build/release/Roomwave-dSYMs.zip
