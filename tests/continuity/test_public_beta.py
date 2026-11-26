@@ -17,7 +17,9 @@ if(Object.hasOwn(input,'phone')) contact.phone=input.phone;
 const sourceSHA='a'.repeat(40);
 const evidence={sourceSHA,
  compiledIdentity:{bundle:BUNDLE,version:VERSION,build:'1003.1',identity_verified:true,usesNonExemptEncryption:false},
- releaseReceipt:{commit:sourceSHA,app_store_app_id:APP,bundle_identifier:BUNDLE,version:VERSION,build:'1003.1',signature_verified:true,upload_accepted:true,ipa_sha256:'b'.repeat(64)},
+ releaseReceipt:{commit:sourceSHA,app_store_app_id:APP,bundle_identifier:BUNDLE,version:VERSION,build:'1003.1',signature_verified:true,upload_accepted:true,ipa_sha256:'b'.repeat(64),
+   workflow_run_id:'45774527262',workflow_run_number:3,workflow_run_attempt:1,
+   allocation_id:'github:timelabs-npo/blueshoes-roomwave:45774527262:1'},
  processingReceipt:{app_id:APP,version:VERSION,build:'1003.1',apple_build_id:buildID,apple_processing:'VALID'},
 };
 if(input.missingEvidence) delete evidence[input.missingEvidence];
@@ -192,6 +194,50 @@ class PublicBetaTests(unittest.TestCase):
         self.assertEqual(report["ipa_sha256"], "b" * 64)
         self.assertTrue(report["promotion_evidence_verified"])
         self.assertEqual(report["build"], "1003.1")
+        self.assertEqual(report["workflow_run_id"], "45774527262")
+        self.assertEqual(report["workflow_run_number"], 3)
+        self.assertEqual(report["workflow_run_attempt"], 1)
+        self.assertEqual(report["allocation_id"], "github:timelabs-npo/blueshoes-roomwave:45774527262:1")
+
+    def test_legacy_receipts_without_observed_allocation_cannot_promote(self):
+        for field in ("workflow_run_id", "workflow_run_number", "workflow_run_attempt", "allocation_id"):
+            with self.subTest(field=field):
+                result = self.scenario(action="stage", apply=True,
+                    receiptChanges=[{"receipt": "releaseReceipt", "key": field, "remove": True}])
+                self.assertEqual(result["results"][-1]["state"], "BLOCKED_PROMOTION_EVIDENCE")
+                self.assertEqual(result["calls"], [])
+
+    def test_allocation_tuple_rejects_tampering_and_conflicting_optional_bindings(self):
+        changes = [
+            [{"receipt": "releaseReceipt", "key": "workflow_run_number", "value": 99},
+             {"receipt": "releaseReceipt", "key": "workflow_run_attempt", "value": 2}],
+        ]
+        for receipt in ("compiledIdentity", "releaseReceipt", "processingReceipt"):
+            for key, value in (("workflow_run_id", "45774527263"), ("workflow_run_number", 99),
+                               ("workflow_run_attempt", 2), ("allocation_id", "github:timelabs-npo/blueshoes-roomwave:45774527263:1"),
+                               ("repository", "another/repository"), ("run_id", "45774527263"),
+                               ("run_number", 99), ("run_attempt", 2), ("build_number", "1099.2")):
+                changes.append([{"receipt": receipt, "key": key, "value": value}])
+        for key, value in (("workflow_run_id", True), ("workflow_run_number", "3"),
+                           ("workflow_run_number", True), ("workflow_run_attempt", "1")):
+            changes.append([{"receipt": "releaseReceipt", "key": key, "value": value}])
+        for mutation in changes:
+            with self.subTest(mutation=mutation):
+                result = self.scenario(action="stage", apply=True, receiptChanges=mutation)
+                self.assertEqual(result["results"][-1]["state"], "BLOCKED_PROMOTION_EVIDENCE")
+                self.assertEqual(result["calls"], [])
+
+    def test_matching_optional_workflow_bindings_are_accepted(self):
+        bindings = {"workflow_run_id": "45774527262", "workflow_run_number": 3, "workflow_run_attempt": 1,
+                    "allocation_id": "github:timelabs-npo/blueshoes-roomwave:45774527262:1",
+                    "run_id": "45774527262", "run_number": 3, "run_attempt": 1,
+                    "repository": "timelabs-npo/blueshoes-roomwave", "build_number": "1003.1"}
+        mutations = [{"receipt": receipt, "key": key, "value": value}
+                     for receipt in ("compiledIdentity", "releaseReceipt", "processingReceipt")
+                     for key, value in bindings.items()]
+        result = self.scenario(action="preflight", receiptChanges=mutations)
+        self.assertEqual(result["results"][-1]["state"], "PREFLIGHT_READY")
+        self.assertTrue(result["results"][-1]["promotion_evidence_verified"])
 
     def test_cli_reads_required_receipts_before_protected_client_initialization(self):
         build_id = "11111111-2222-3333-4444-555555555555"
@@ -203,7 +249,9 @@ class PublicBetaTests(unittest.TestCase):
                     "build": "1003.1", "identity_verified": True, "usesNonExemptEncryption": False},
                 "release-receipt": {"commit": source, "app_store_app_id": "6837899703",
                     "bundle_identifier": "org.timelabs.moleculefoundry", "version": "0.3.0", "build": "1003.1",
-                    "signature_verified": True, "upload_accepted": True, "ipa_sha256": "b" * 64},
+                    "signature_verified": True, "upload_accepted": True, "ipa_sha256": "b" * 64,
+                    "workflow_run_id": "45774527262", "workflow_run_number": 3, "workflow_run_attempt": 1,
+                    "allocation_id": "github:timelabs-npo/blueshoes-roomwave:45774527262:1"},
                 "processing-receipt": {"app_id": "6837899703", "version": "0.3.0", "build": "1003.1",
                     "apple_build_id": build_id, "apple_processing": "VALID"},
             }

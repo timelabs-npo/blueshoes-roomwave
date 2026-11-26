@@ -17,6 +17,7 @@ export const PRIVACY_URL = `${MARKETING_URL}/blob/main/docs/PRIVACY.md`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SOURCE_SHA = /^[0-9a-f]{40}$/i;
 const DIGEST = /^[0-9a-f]{64}$/i;
+const RELEASE_REPOSITORY = 'timelabs-npo/blueshoes-roomwave';
 const APPROVED_EXTERNAL = new Set(['BETA_APPROVED', 'IN_BETA_TESTING']);
 const ACTIONS = new Set(['preflight', 'stage', 'submit', 'enable-public-link']);
 
@@ -88,10 +89,25 @@ export function verifyPromotionEvidence({ sourceSHA, compiledIdentity, releaseRe
   ensure(processingReceipt.app_id === APP && processingReceipt.version === VERSION && processingReceipt.build === build
     && processingReceipt.apple_build_id === buildID && processingReceipt.apple_processing === 'VALID',
     'BLOCKED_PROMOTION_EVIDENCE', 'Processing receipt must bind the accepted release to this exact VALID Apple build UUID');
+  // release-allocation.py is the authority for the allocation schema. Its
+  // first-attempt-only build number and allocation ID must describe one run.
+  // Historical receipts without that tuple remain unproven, not upgraded by
+  // guessing an attempt from a build suffix or an operator's current workflow.
+  const runID = releaseReceipt.workflow_run_id;
+  const runNumber = releaseReceipt.workflow_run_number;
+  const runAttempt = releaseReceipt.workflow_run_attempt;
+  ensure(typeof runID === 'string' && /^[1-9][0-9]{0,19}$/.test(runID)
+    && Number.isInteger(runNumber) && runNumber >= 1 && runNumber <= 8999
+    && runAttempt === 1 && build === `${1000 + runNumber}.${runAttempt}`
+    && releaseReceipt.allocation_id === `github:${RELEASE_REPOSITORY}:${runID}:${runAttempt}`,
+    'BLOCKED_PROMOTION_EVIDENCE', 'Accepted release must contain a coherent observed workflow/run/build/allocation tuple; legacy missing bindings remain unproven');
+  const allocation = { allocation_id: releaseReceipt.allocation_id, workflow_run_id: runID,
+    workflow_run_number: runNumber, workflow_run_attempt: runAttempt };
   // Existing producers may add these bindings. If supplied, none may conflict.
   const optional = { source_sha: sourceSHA, commit: sourceSHA, app_id: APP, app_store_app_id: APP,
     bundle: BUNDLE, bundle_id: BUNDLE, bundle_identifier: BUNDLE, apple_build_id: buildID,
-    ipa_sha256: releaseReceipt.ipa_sha256 };
+    ipa_sha256: releaseReceipt.ipa_sha256, ...allocation, repository: RELEASE_REPOSITORY,
+    run_id: runID, run_number: runNumber, run_attempt: runAttempt, build_number: build };
   for (const receipt of [compiledIdentity, releaseReceipt, processingReceipt]) {
     for (const [key, expected] of Object.entries(optional)) {
       ensure(!Object.hasOwn(receipt, key) || receipt[key] === expected,
@@ -99,7 +115,7 @@ export function verifyPromotionEvidence({ sourceSHA, compiledIdentity, releaseRe
     }
   }
   return Object.freeze({ source_sha: sourceSHA, app_id: APP, bundle_id: BUNDLE, version: VERSION,
-    build, apple_build_id: buildID, ipa_sha256: releaseReceipt.ipa_sha256,
+    build, apple_build_id: buildID, ipa_sha256: releaseReceipt.ipa_sha256, ...allocation,
     promotion_evidence_verified: true, receipt_provenance: 'operator-trusted-release-artifact' });
 }
 

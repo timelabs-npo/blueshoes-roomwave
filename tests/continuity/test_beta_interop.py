@@ -25,7 +25,9 @@ const sourceSHA = 'a'.repeat(40);
 const evidence = { sourceSHA,
   compiledIdentity: { bundle: BUNDLE, version: VERSION, build: '1003.1', identity_verified: true, usesNonExemptEncryption: false },
   releaseReceipt: { commit: sourceSHA, app_store_app_id: APP, bundle_identifier: BUNDLE, version: VERSION,
-    build: '1003.1', signature_verified: true, upload_accepted: true, ipa_sha256: 'b'.repeat(64) },
+    build: '1003.1', signature_verified: true, upload_accepted: true, ipa_sha256: 'b'.repeat(64),
+    workflow_run_id: '45774527262', workflow_run_number: 3, workflow_run_attempt: 1,
+    allocation_id: 'github:timelabs-npo/blueshoes-roomwave:45774527262:1' },
   processingReceipt: { app_id: APP, version: VERSION, build: '1003.1', apple_build_id: buildID, apple_processing: 'VALID' },
 };
 const publicGroupID = 'public-group';
