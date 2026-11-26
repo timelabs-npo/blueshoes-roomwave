@@ -3,6 +3,87 @@ import RoomwaveCreator
 @testable import Roomwave
 
 final class XActivityClientTests: XCTestCase {
+    @MainActor
+    func testDelayedOld401CannotRenewAReplacementSession() async throws {
+        let requestOperation = UUID()
+        var currentOperation = requestOperation
+        var storedAccessToken = "old-access"
+        var renewals: [Bool] = []
+        var reads: [String] = []
+        do {
+            _ = try await XAuthorizedRead.perform(isCurrent: { currentOperation == requestOperation }, renew: { force in
+                renewals.append(force)
+                return storedAccessToken
+            }, read: { token in
+                reads.append(token)
+                await Task.yield()
+                // Model disconnect + successful new authorization while the old
+                // transport response is suspended. No real Keychain or HTTP.
+                currentOperation = UUID()
+                storedAccessToken = "new-session-access"
+                throw XActivityError.unauthorized
+            })
+            XCTFail("The old operation must be cancelled")
+        } catch is CancellationError {}
+        XCTAssertEqual(renewals, [false], "The late 401 must not rotate the new session's refresh token")
+        XCTAssertEqual(reads, ["old-access"])
+        XCTAssertEqual(storedAccessToken, "new-session-access")
+    }
+
+    @MainActor
+    func testReplacementDuringRenewalPreventsTheOldRead() async throws {
+        let requestOperation = UUID()
+        var currentOperation = requestOperation
+        var readCount = 0
+        do {
+            _ = try await XAuthorizedRead.perform(isCurrent: { currentOperation == requestOperation }, renew: { _ in
+                await Task.yield()
+                currentOperation = UUID()
+                return "obsolete-access"
+            }, read: { _ in
+                readCount += 1
+                return Data()
+            })
+            XCTFail("A replacement session must invalidate the suspended renewal")
+        } catch is CancellationError {}
+        XCTAssertEqual(readCount, 0)
+    }
+
+    @MainActor
+    func testCurrentSession401RetriesExactlyOnce() async throws {
+        for secondReadSucceeds in [true, false] {
+            var renewals: [Bool] = []
+            var reads: [String] = []
+            do {
+                let data = try await XAuthorizedRead.perform(isCurrent: { true }, renew: { force in
+                    renewals.append(force)
+                    return force ? "renewed-access" : "initial-access"
+                }, read: { token in
+                    reads.append(token)
+                    guard token == "renewed-access", secondReadSucceeds else { throw XActivityError.unauthorized }
+                    return Data("observed-response".utf8)
+                })
+                XCTAssertTrue(secondReadSucceeds)
+                XCTAssertEqual(data, Data("observed-response".utf8))
+            } catch XActivityError.unauthorized {
+                XCTAssertFalse(secondReadSucceeds)
+            }
+            XCTAssertEqual(renewals, [false, true])
+            XCTAssertEqual(reads, ["initial-access", "renewed-access"])
+        }
+    }
+
+    func testCommunityQueryRejectsOversizedCombiningClustersBeforeEncoding() throws {
+        XCTAssertEqual(try XCommunityQuery.normalized("  #Roomwave OR #TwitterSurfer  "), "#Roomwave OR #TwitterSurfer")
+        XCTAssertEqual(try XCommunityQuery.normalized(String(repeating: "a", count: 256)).count, 256)
+        let oneCluster = "a" + String(repeating: "\u{0301}", count: 256)
+        XCTAssertEqual(oneCluster.count, 1, "A grapheme limit alone does not bound a request")
+        XCTAssertThrowsError(try XCommunityQuery.normalized(oneCluster))
+        XCTAssertThrowsError(try XCommunityQuery.normalized(String(repeating: " ", count: 1_025) + "x"))
+        XCTAssertThrowsError(try XCommunityQuery.normalized("a\nb"))
+        XCTAssertThrowsError(try XCommunityQuery.normalized("   "))
+    }
+
     func testOAuthUsesS256PKCEAndReadOnlyScopes() throws {
         let verifier = String(repeating: "a", count: 43)
         let url = try XOAuth.authorizationURL(clientID: "public-client", state: "state", verifier: verifier)

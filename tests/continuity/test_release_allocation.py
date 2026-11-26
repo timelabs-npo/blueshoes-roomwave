@@ -42,11 +42,14 @@ class ReleaseAllocationTests(unittest.TestCase):
         compiled = {"bundle": module.BUNDLE, "version": "0.3.0", "build": "1003.1",
                     "identity_verified": True, "usesNonExemptEncryption": False}
         (self.directory / "ipa-identity.json").write_text(json.dumps(compiled))
+        symbols = self.directory / "Roomwave-dSYMs.zip"
+        symbols.write_bytes(b"synthetic symbols for offline allocation regression")
         # Synthetic policy evidence only; no real signing claim is made by tests.
         signature = {"app_id": module.APP, "bundle_identifier": module.BUNDLE,
                      "version": "0.3.0", "build": "1003.1", "team_id": module.TEAM,
                      "signature_verified": True, "distribution_profile_verified": True,
-                     "signer_certificate_sha256": "c" * 64, "ipa_sha256": module.digest(self.ipa)}
+                     "signer_certificate_sha256": "c" * 64, "ipa_sha256": module.digest(self.ipa),
+                     "dsym_verified": True, "dsym_sha256": module.digest(symbols)}
         (self.directory / "exported-signature.json").write_text(json.dumps(signature))
         self.operator.record_export()
 
@@ -122,6 +125,7 @@ class ReleaseAllocationTests(unittest.TestCase):
             ("release-receipt.json", {"app_store_app_id": "111"}),
             ("release-receipt.json", {"signature_verified": False}),
             ("release-receipt.json", {"ipa_sha256": "0" * 64}),
+            ("release-receipt.json", {"dsym_sha256": "0" * 64}),
             ("ipa-identity.json", {"build": "1004.1"}),
             ("ipa-identity.json", {"usesNonExemptEncryption": True}),
             ("exported-signature.json", {"bundle_identifier": "org.example.other"}),
@@ -133,6 +137,8 @@ class ReleaseAllocationTests(unittest.TestCase):
             ("exported-signature.json", {"distribution_profile_verified": False}),
             ("exported-signature.json", {"ipa_sha256": "0" * 64}),
             ("exported-signature.json", {"signer_certificate_sha256": "invalid"}),
+            ("exported-signature.json", {"dsym_verified": False}),
+            ("exported-signature.json", {"dsym_sha256": "0" * 64}),
         ):
             with self.subTest(filename=filename, changes=changes):
                 path = self.directory / filename
@@ -183,6 +189,34 @@ class ReleaseAllocationTests(unittest.TestCase):
                     self.operator.verify_upload(consume=True)
                 self.environ[key] = original
                 self.assertFalse((self.directory / "upload-consumed.json").exists())
+
+    def test_changed_or_missing_symbols_block_prepare_and_consumption(self):
+        self.exported()
+        symbols = self.directory / "Roomwave-dSYMs.zip"
+        original = symbols.read_bytes()
+        symbols.write_bytes(b"different synthetic symbols")
+        with self.assertRaises(module.Blocked):
+            self.operator.prepare_upload()
+        symbols.write_bytes(original)
+        intent = self.operator.prepare_upload()
+        self.assertEqual(intent['dsym_sha256'], module.digest(symbols))
+        symbols.write_bytes(b"different synthetic symbols")
+        with self.assertRaises(module.Blocked):
+            self.operator.verify_upload(consume=True)
+        symbols.unlink()
+        with self.assertRaises(module.Blocked):
+            self.operator.verify_upload(consume=True)
+        self.assertFalse((self.directory / "upload-consumed.json").exists())
+
+    def test_symbol_binding_cannot_be_replaced_after_intent(self):
+        self.exported()
+        self.operator.prepare_upload()
+        path = self.directory / "upload-intent.json"
+        intent = json.loads(path.read_text())
+        path.write_text(json.dumps({**intent, 'dsym_sha256': '0' * 64}))
+        with self.assertRaises(module.Blocked):
+            self.operator.verify_upload(consume=True)
+        self.assertFalse((self.directory / "upload-consumed.json").exists())
 
     def test_no_acceptance_without_prior_consumption_or_with_replaced_intent(self):
         self.exported()

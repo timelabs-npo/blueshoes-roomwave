@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inject only the public native OAuth client ID; credentials never belong in an IPA."""
+"""Verify that public OAuth configuration matches the reviewed source exactly."""
 import os
 from pathlib import Path
 import plistlib
@@ -8,12 +8,13 @@ import re
 
 def configure(path, client_id=None):
     info = plistlib.loads(path.read_bytes())
-    value = info.get('XOAuthClientID', '') if client_id is None else client_id
+    value = info.get('XOAuthClientID', '')
     if not isinstance(value, str) or (value and not re.fullmatch(r'[A-Za-z0-9_.~-]{1,256}', value)):
         raise ValueError('X_OAUTH_CLIENT_ID must be a public OAuth client identifier without whitespace')
-    if info.get('XOAuthClientID') != value:
-        info['XOAuthClientID'] = value
-        path.write_bytes(plistlib.dumps(info, sort_keys=False))
+    # A workflow variable is a consistency assertion, never an unreviewed edit
+    # to the binary built under a source-only release receipt.
+    if client_id is not None and client_id != value:
+        raise ValueError('X OAuth configuration differs from the reviewed source; update it through code review')
     return bool(value)
 
 
