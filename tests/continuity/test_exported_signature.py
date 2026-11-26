@@ -1,7 +1,9 @@
 """Offline signature-policy regressions; Apple command calls are simulated."""
 from copy import deepcopy
+from contextlib import redirect_stderr
 from datetime import datetime, timedelta, timezone
 import importlib.util
+import io
 from pathlib import Path
 import plistlib
 import subprocess
@@ -179,8 +181,16 @@ class ExportedSignatureTests(unittest.TestCase):
                 elif args[0] == 'security':
                     profile = {**self.profile, 'ExpirationDate': self.profile['ExpirationDate'].replace(tzinfo=None)}
                     output = plistlib.dumps(profile)
-                elif '--extract-certificates' in args:
-                    Path(args[3] + '0').write_bytes(self.certificate)
+                elif any(arg.startswith('--extract-certificates') for arg in args):
+                    # Optional long-option values must be joined with '='.
+                    # A separated prefix is another codesign object path.
+                    self.assertEqual(len(args), 4)
+                    self.assertEqual(args[0:2], ('codesign', '-d'))
+                    self.assertTrue(args[2].startswith('--extract-certificates='))
+                    prefix = args[2].partition('=')[2]
+                    self.assertTrue(prefix)
+                    self.assertTrue(Path(args[3]).is_dir())
+                    Path(prefix + '0').write_bytes(self.certificate)
                 elif args[0:3] == ('xcrun', 'dwarfdump', '--uuid'):
                     is_symbols = 'symbols' in Path(args[-1]).parts
                     uuid = symbols_uuid if is_symbols else app_uuid
@@ -210,6 +220,27 @@ class ExportedSignatureTests(unittest.TestCase):
                 return command(*args, **kwargs)
             with patch.object(module, 'run_command', side_effect=rejecting_command), self.assertRaises(ValueError):
                 module.verify_ipa(path, '0.3.0', '1003.1', symbols_archive)
+
+    def test_cli_failure_reports_stage_without_raw_exception_data_or_receipt(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / 'signature.json'
+            error_log = io.StringIO()
+            def unreadable_export(*args, **kwargs):
+                with module.verification_stage('exported-entitlements'):
+                    raise ValueError('private-tool-output-sentinel')
+            with patch.object(module, 'verify_ipa', side_effect=unreadable_export), redirect_stderr(error_log):
+                status = module.main([str(Path(folder) / 'app.ipa'), '--build', '1003.1',
+                                      '--dsym-archive', str(Path(folder) / 'symbols.zip'),
+                                      '--output', str(output)])
+            self.assertEqual(status, 2)
+            self.assertIn('exported-entitlements: ValueError', error_log.getvalue())
+            self.assertNotIn('private-tool-output-sentinel', error_log.getvalue())
+            self.assertFalse(output.exists())
+
+    def test_policy_failure_keeps_fixed_reason_and_stage(self):
+        with self.assertRaisesRegex(module.VerificationFailure, 'signer-certificate: codesign verification failed'):
+            with module.verification_stage('signer-certificate'):
+                module.require(False, 'codesign verification failed')
 
 
 if __name__ == '__main__':

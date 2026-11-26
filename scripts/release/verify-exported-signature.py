@@ -5,6 +5,7 @@ The receipt is operator evidence tied to the IPA digest, not a standalone
 cryptographic attestation. Apple signing tools are required for live execution.
 """
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -28,9 +29,25 @@ UUID_PATTERN = r'[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-
 DSYM_MEMBER = 'dSYMs/Roomwave.app.dSYM/Contents/Resources/DWARF/Roomwave'
 
 
+class VerificationFailure(ValueError):
+    """Only fixed policy messages and stage names may reach operator logs."""
+
+
 def require(condition, message):
     if not condition:
-        raise ValueError(message)
+        raise VerificationFailure(message)
+
+
+@contextmanager
+def verification_stage(name):
+    try:
+        yield
+    except VerificationFailure as error:
+        raise VerificationFailure(name + ': ' + str(error)) from None
+    except (OSError, ValueError, zipfile.BadZipFile, plistlib.InvalidFileException,
+            subprocess.SubprocessError, UnicodeError) as error:
+        # Never include raw tool stderr, parsed values, paths or exception text.
+        raise VerificationFailure(name + ': ' + type(error).__name__) from None
 
 
 def digest(path):
@@ -141,19 +158,27 @@ def verify_ipa(ipa, version, build, dsym_archive):
         require(len(apps) == 1 and apps[0].is_dir() and not apps[0].is_symlink(),
                 'IPA must extract to exactly one regular primary app')
         app = apps[0]
-        run_command('codesign', '--verify', '--deep', '--strict', str(app))
-        entitlements = plistlib.loads(run_command('codesign', '-d', '--entitlements', '-', '--xml', str(app)).stdout)
-        detail = run_command('codesign', '-dvv', str(app))
-        team = re.search(rb'^TeamIdentifier=(\S+)\s*$', detail.stderr, re.MULTILINE)
-        require(team is not None, 'Exported code signature has no team identifier')
+        with verification_stage('code-signature'):
+            run_command('codesign', '--verify', '--deep', '--strict', str(app))
+        with verification_stage('exported-entitlements'):
+            entitlements = plistlib.loads(run_command('codesign', '-d', '--entitlements', '-', '--xml', str(app)).stdout)
+        with verification_stage('signing-team'):
+            detail = run_command('codesign', '-dvv', str(app))
+            team = re.search(rb'^TeamIdentifier=(\S+)\s*$', detail.stderr, re.MULTILINE)
+            require(team is not None, 'Exported code signature has no team identifier')
         embedded = app / 'embedded.mobileprovision'
         require(embedded.is_file() and not embedded.is_symlink(), 'Embedded distribution profile is missing')
-        profile = plistlib.loads(run_command('security', 'cms', '-D', '-i', str(embedded)).stdout)
+        with verification_stage('distribution-profile'):
+            profile = plistlib.loads(run_command('security', 'cms', '-D', '-i', str(embedded)).stdout)
         certificate_prefix = root / 'signer-'
-        run_command('codesign', '-d', '--extract-certificates', str(certificate_prefix), str(app))
-        signer = Path(str(certificate_prefix) + '0').read_bytes()
+        with verification_stage('signer-certificate'):
+            # codesign optional values require '='; a separated prefix is
+            # interpreted as another code object rather than the output prefix.
+            run_command('codesign', '-d', '--extract-certificates=' + str(certificate_prefix), str(app))
+            signer = Path(str(certificate_prefix) + '0').read_bytes()
         info = plistlib.loads((app / 'Info.plist').read_bytes())
-        receipt = verify_metadata(info, entitlements, profile, team[1].decode('ascii'), signer, version, build)
+        with verification_stage('identity-and-profile-policy'):
+            receipt = verify_metadata(info, entitlements, profile, team[1].decode('ascii'), signer, version, build)
         require(info.get('CFBundleExecutable') == 'Roomwave', 'Unexpected exported executable')
         executable = app / 'Roomwave'
         require(executable.is_file() and not executable.is_symlink(), 'Exported executable is missing')
@@ -161,8 +186,9 @@ def verify_ipa(ipa, version, build, dsym_archive):
         run_command('ditto', '-x', '-k', str(dsym_archive), str(symbols_root), seconds=120)
         symbols = symbols_root / DSYM_MEMBER
         require(symbols.is_file() and not symbols.is_symlink(), 'Application symbols are missing')
-        uuids = macho_uuids(executable)
-        require(uuids == macho_uuids(symbols), 'Application symbols do not match the exported executable UUIDs')
+        with verification_stage('executable-and-symbol-uuids'):
+            uuids = macho_uuids(executable)
+            require(uuids == macho_uuids(symbols), 'Application symbols do not match the exported executable UUIDs')
     require(digest(ipa) == checksum, 'Exported IPA changed during signature verification')
     require(digest(dsym_archive) == symbols_checksum, 'dSYM archive changed during verification')
     return {**receipt, 'ipa_sha256': checksum, 'dsym_verified': True,
@@ -186,6 +212,10 @@ def main(argv=None):
             stream.write('\n')
         print(json.dumps(receipt, sort_keys=True))
         return 0
+    except VerificationFailure as error:
+        print('Exported IPA signature verification failed: ' + str(error)
+              + '; no release receipt or upload intent is authorized', file=sys.stderr)
+        return 2
     except (OSError, ValueError, zipfile.BadZipFile, plistlib.InvalidFileException,
             subprocess.SubprocessError, UnicodeError):
         # Private tool stderr, profile fields and local paths stay out of logs.
