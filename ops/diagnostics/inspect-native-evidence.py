@@ -5,6 +5,7 @@ from pathlib import Path, PurePosixPath
 
 REPO = "timelabs-npo/blueshoes-roomwave"
 PINS = {
+    15080354005: [45739502906,"751726dae45137ca36457b72a83966b8ca455f42","b876756b66876c4f9deb92946a2b3bc0c22508f2","roomwave-arcade-evidence",6337,"2d2c40785510951087df0d82660e1bfcbaa2c517267790009e7a5cc7c727c36f"],
     15076946459: [45729132932,"81a92749d5b08ad2c525db9e45715051604d7eec","3eb06083436a3aabc169dda0a544215f6ebc407e","roomwave-native-review",18399086,"c1ad6f3a78f1f0d1102efe32fe597f75a0f2bf6d68fd2c392de26b68b74ee701"],
     15076614755: [45729709518,"1fa4d86072734bacbc3e6a8c66ff310033fdb9b3","cf7d08cffb85a242ae5784c3988dc9b8b300224e","roomwave-native-review",4577229,"bde5a6dd8b9c58864cfcada6d0e4b2c51f5950c858b5c0bd36e25bcda362fc2a"],
     15076488863: [45729132932,"81a92749d5b08ad2c525db9e45715051604d7eec","3eb06083436a3aabc169dda0a544215f6ebc407e","roomwave-arcade-evidence",485855549,"baeeb54cbe43401507a8201aab2cca36c8746492de0462fd1de4a8238b13207d"],
@@ -118,6 +119,44 @@ def main():
     def text(name, limit=262144):
         require(names[name].file_size <= limit, "selected_text_size")
         return archive.read(name).decode("utf-8", errors="replace")
+    if artifact_id == 15080354005:
+        # This exact pinned attempt stopped before the normal evidence directory existed.
+        required = {"native-run-start.json", "simulators.json", "simulator-runtimes.json",
+                    "simulator-selection.json", "runner-identity.json", "runner-metal.json"}
+        require(len(names) == len(required)
+                and {PurePosixPath(name).name for name in names} == required, "boot_inventory_mismatch")
+        documents = {name: json.loads(text(one(name))) for name in sorted(required)}
+        start = documents["native-run-start.json"]
+        checkout = start["source_sha"]
+        require(isinstance(checkout, str) and re.fullmatch(r"[0-9a-f]{40}", checkout), "checkout_sha")
+        actual = commit if checkout == source else api(prefix + "/git/commits/" + checkout)
+        require(actual["sha"] == checkout and actual["tree"]["sha"] == tree
+                and (checkout == source or any(p["sha"] == source for p in actual["parents"])),
+                "checkout_tree_or_parent")
+        require(str(start["run_id"]) == str(run_id) and start["purpose"] == "sdk-matched-native-gate"
+                and start.get("requested_runtime") is None, "start_identity")
+        data.seek(0)
+        original = data.read(size + 1)
+        require(len(original) == size and hashlib.sha256(original).hexdigest() == digest,
+                "preserved_original_digest")
+        destination = Path("build/diagnostic-originals")
+        destination.mkdir(parents=True, exist_ok=True)
+        stem = "native-run-45739502906-attempt-1-artifact-15080354005"
+        with (destination / (stem + ".zip")).open("xb") as saved:
+            saved.write(original)
+        receipt = {"schema_version": 1, "verified": expected, "checkout_sha": checkout,
+                   "original_zip": stem + ".zip", "original_bytes_preserved": True,
+                   "scope": "pre-native-simulator-readiness", "native_evidence_verified": False}
+        with (destination / (stem + ".json")).open("x", encoding="utf-8") as saved:
+            saved.write(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+        emit({**receipt, "conclusion": run["conclusion"], "event": run["event"],
+              "checkout_source": "native-run-start.json",
+              "absent": ["source-sha.txt", "native-test.log", "boot log", "xcresult",
+                         "ARView captures", "UI attachments", "evidence-collection.json"]})
+        emit({"inventory": [{"name": n, "bytes": entry.file_size} for n, entry in sorted(names.items())]})
+        for name, value in documents.items():
+            emit({"entry": one(name), "value": value})
+        return
     checkout = text(one("source-sha.txt")).strip()
     require(re.fullmatch(r"[0-9a-f]{40}", checkout), "checkout_sha")
     actual = commit if checkout == source else api(prefix + "/git/commits/" + checkout)

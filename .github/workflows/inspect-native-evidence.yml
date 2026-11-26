@@ -27,25 +27,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: old-avatar-81a9274
-            request: ops/diagnostics/native-evidence-request.json
-          - label: x-release-fixes-1fa4d86
-            request: ops/diagnostics/pr7-native-evidence-request.json
+          - label: boot-readiness-751726d
+            request: ops/diagnostics/boot-751726d-evidence-request.json
     name: Inspect ${{ matrix.label }}
     steps:
       - name: Check out inspection source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Prepare bounded screenshot reader
-        timeout-minutes: 1
-        run: |
-          python3 -m venv "$RUNNER_TEMP/evidence-env"
-          "$RUNNER_TEMP/evidence-env/bin/python" -m pip install --disable-pip-version-check --no-input --only-binary=:all: Pillow==13.0.0
-          "$RUNNER_TEMP/evidence-env/bin/python" -m py_compile ops/diagnostics/inspect-native-evidence.py
+      - name: Check bounded reader syntax
+        run: python3 -m py_compile ops/diagnostics/inspect-native-evidence.py
       - name: Verify original ZIP and print selected evidence
         timeout-minutes: 3
         env:
           GITHUB_TOKEN: ${{ github.token }}
           EVIDENCE_REQUEST: ${{ matrix.request }}
-        run: '"$RUNNER_TEMP/evidence-env/bin/python" ops/diagnostics/inspect-native-evidence.py "$EVIDENCE_REQUEST"'
+        run: 'python3 ops/diagnostics/inspect-native-evidence.py "$EVIDENCE_REQUEST"'
+      - name: Preserve hash-verified original first-attempt ZIP
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: original-native-45739502906-attempt-1
+          path: build/diagnostic-originals
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "repository": "timelabs-npo/blueshoes-roomwave",
+  "run_id": 45739502906,
+  "run_attempt": 1,
+  "source_sha": "751726dae45137ca36457b72a83966b8ca455f42",
+  "tree_sha": "b876756b66876c4f9deb92946a2b3bc0c22508f2",
+  "artifact_id": 15080354005,
+  "artifact_name": "roomwave-arcade-evidence",
+  "size_bytes": 6337,
+  "sha256": "2d2c40785510951087df0d82660e1bfcbaa2c517267790009e7a5cc7c727c36f"
+}
