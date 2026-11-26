@@ -20,9 +20,12 @@ Photo and LiDAR creation are secondary. Actual local image/mesh features produce
 
 ## Beta status and evidence
 
-The active target is **0.3.0**, using the existing authorized Apple bundle. The older internal TestFlight pilot **0.2.0 (1002.1)** is preserved in an archive branch. A public-beta URL will be added only after the new exact build receives external approval and the link is verified.
+Apple accepted **0.3.0 (1004.1)** and processed it to **VALID** on 26 November 2026. The exact signed source is `5af27ee4bbc7231d5f45ceba5bec40ade70ea4bc`, using the existing authorized Apple bundle. The release workflow stopped afterward when a distribution API operation returned HTTP 403. Public staging also returned 403; the latest readback still reports `READY_FOR_BETA_SUBMISSION`, with no verified public link. Continue distribution of this existing build rather than uploading it again.
+
+The older internal TestFlight pilot **0.2.0 (1002.1)** is preserved in an archive branch. A public-beta URL will be added only after the new exact build receives external approval and the link is verified. [The 1004.1 release record](docs/evidence/RELEASE_1004_1.md) separates uploaded-binary evidence, distribution access and public availability.
 
 - [Arcade acceptance and actual worker receipts](docs/ARCADE_ACCEPTANCE.md)
+- [Two completed Codex CLI review sessions and provider evidence](docs/evidence/SESSION_20261126_0727.md)
 - [Native validation runs](https://github.com/timelabs-npo/blueshoes-roomwave/actions/workflows/unsigned-ios.yml)
 - [TestFlight delivery and historical pilot](docs/TESTFLIGHT_DELIVERY.md)
 - [External beta operations](docs/PUBLIC_BETA.md)
