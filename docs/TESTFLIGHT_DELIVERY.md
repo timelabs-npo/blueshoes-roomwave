@@ -4,9 +4,30 @@ The active arcade rebuild is **0.3.0**. See [arcade acceptance](ARCADE_ACCEPTANC
 
 The user authorized replacing the existing Molecular/Molecule Foundry beta with Roomwave. Roomwave is delivered under the existing Apple identity below. This workflow uploads a TestFlight beta; it does not submit or publish an App Store production update.
 
-## Current v0.3 release procedure
+## Accepted v0.3 build and current distribution boundary
 
-The active app is **Roomwave · Slipstream 0.3.0**. Corrected native run [45686764139](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45686764139) passed at source `41ed282b47bc2231f5b444914f1c8389e5635859`. Later source changes retain their own validation gates; that run must not be relabeled as evidence for another commit.
+The active app is **Roomwave · Slipstream 0.3.0**. Apple accepted **0.3.0 (1004.1)** at **11:34:57 Europe/Moscow on 26 November 2026** and processing was observed as **VALID** at **11:36:29**. The exact build is already uploaded; do not dispatch or upload another binary to resolve the distribution-access failure.
+
+| Field | Verified current release |
+| --- | --- |
+| Existing app / bundle | `6837899703` / `org.timelabs.moleculefoundry` |
+| Signed source | `5af27ee4bbc7231d5f45ceba5bec40ade70ea4bc` |
+| Version / build | `0.3.0 (1004.1)` |
+| Apple build UUID | `d9a65d0d-191b-449c-9780-28c2eafcc551` |
+| Protected release run | [45781149685](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45781149685), number 4, attempt 1 |
+| Native evidence | 18 hosted tests; ordinary touch UI scenario passed; eight actual ARView captures |
+| Upload and processing | Accepted; `VALID` |
+| Later distribution outcome | Internal finalization and public staging returned HTTP 403 |
+| External state at 11:54:38 Europe/Moscow | `READY_FOR_BETA_SUBMISSION`; target group and review submission absent |
+| Public availability | No verified public link or active external testing |
+
+The complete [1004.1 evidence record](evidence/RELEASE_1004_1.md) retains artifact digests, exact source binding, operation outcomes and reconciliation limits. Its successful upload and processing are separate from the workflow's later failure. The later `97daf1ea80c055a43651d5df9ba581c2eeb365f9` changes release-observation logic, documentation and tests; it does not change the source identity of the uploaded IPA.
+
+The ordinary App Store Connect browser fallback reached an Apple Account sign-in wall with a passkey confirmation prompt. An authenticated browser session is needed before that UI can perform the remaining staging and review actions. No UI submission or Apple review approval is claimed.
+
+## Procedure for a future binary
+
+The following allocation/signing procedure applies only when a new binary is deliberately required. **For the current 1004.1 build, continue from its existing UUID and receipts.**
 
 Dispatch `testflight.yml` once from reviewed `main` with the exact `expected_sha`, `export_ipa=true` and `upload=true`. Read the allocated GitHub run identity and require attempt **1**. Claim the resulting `(1000 + run_number).1` build in the authoritative continuity store **before approving the protected release job**. Do not guess the next run number. The main-only environment and required reviewer remain in place.
 
@@ -16,7 +37,7 @@ The preserved signed IPA is a release artifact, not a source-repository file. Ne
 
 After signing/upload, the workflow observes the exact Apple build and calls [internal finalization](INTERNAL_BETA.md) with the actual IPA identity receipt. It updates truthful beta metadata and associates only the exact build with the existing internal group. If processing or activation remains pending, reconcile that same UUID; do not upload again to poll it. Credentials and signing material remain protected.
 
-The real external Beta App Review contact was absent in the inspected Apple record. First name, last name, email and international phone must be supplied privately or entered directly by the owner. [External beta operations](PUBLIC_BETA.md) keeps exact-build review and public-link checks separate from internal availability. No public link, invitation or community post is claimed.
+The fresh external preflight and reconciliation on 26 November 2026 verified that a complete review contact is present and available in the existing Apple record. No contact values are copied into the repository, and no replacement contact is required by that observation. [External beta operations](PUBLIC_BETA.md) keeps exact-build review and public-link checks separate from internal availability. No public link, invitation or community post is claimed.
 
 The installed app name is Roomwave. The Apple listing was still **Molecule Foundry**. A guarded name-only PATCH requesting **Roomwave Slipstream** returned HTTP **403** at 20:06:08 UTC on 25 November 2026. No successful rename is claimed. Authorized access to that exact metadata operation, or an owner-performed change, is required. This denial is not bypassed with a different identity or broader mutation.
 
