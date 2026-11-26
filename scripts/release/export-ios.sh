@@ -99,14 +99,14 @@ fi
 IPA=$(find build/release/export -maxdepth 1 -name '*.ipa' -print -quit)
 [[ -n "$IPA" ]] || { echo 'Signed IPA not produced.'; exit 2; }
 python3 scripts/release/verify-app.py "$IPA" --build "$BUILD_NUMBER" > build/release/ipa-identity.json
-python3 scripts/release/verify-exported-signature.py "$IPA" --build "$BUILD_NUMBER" \
-  --output build/release/exported-signature.json
 # Retain the actual archive's symbols before preserving any upload intent.
 DSYM_ROOT=build/release/Roomwave.xcarchive/dSYMs
 [[ -s "$DSYM_ROOT/Roomwave.app.dSYM/Contents/Resources/DWARF/Roomwave" ]] || {
   echo 'The signed archive has no application debug symbols.'; exit 2
 }
 ditto -c -k --keepParent "$DSYM_ROOT" build/release/Roomwave-dSYMs.zip
+python3 scripts/release/verify-exported-signature.py "$IPA" --build "$BUILD_NUMBER" \
+  --dsym-archive build/release/Roomwave-dSYMs.zip --output build/release/exported-signature.json
 # Upload occurs in a separate step only after its immutable intent and signed
 # binary have been preserved as a GitHub artifact. This stage never uploads.
 python3 scripts/release/release-allocation.py record-export

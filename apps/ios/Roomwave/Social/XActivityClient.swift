@@ -123,6 +123,49 @@ enum XSnapshotDecoder {
     }
 }
 
+enum XCommunityQuery {
+    static let maximumUTF8Bytes = 1_024
+    static let maximumScalars = 256
+
+    static func normalized(_ query: String) throws -> String {
+        // Bound the original input before trimming, keying or percent encoding.
+        // String.count alone permits an arbitrarily large combining cluster.
+        guard query.utf8.count <= maximumUTF8Bytes else { throw XActivityError.invalidQuery }
+        let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.unicodeScalars.count <= maximumScalars,
+              !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            throw XActivityError.invalidQuery
+        }
+        return value
+    }
+}
+
+/// The production authenticated-read sequence, isolated for deterministic tests
+/// with suspended responses and replacement sessions, without Keychain or HTTP.
+@MainActor
+enum XAuthorizedRead {
+    static func perform(isCurrent: @MainActor () -> Bool,
+                        renew: @MainActor (Bool) async throws -> String,
+                        read: @MainActor (String) async throws -> Data) async throws -> Data {
+        guard isCurrent() else { throw CancellationError() }
+        let token = try await renew(false)
+        guard isCurrent() else { throw CancellationError() }
+        do {
+            let data = try await read(token)
+            guard isCurrent() else { throw CancellationError() }
+            return data
+        } catch XActivityError.unauthorized {
+            // A delayed 401 must never renew credentials from a newer session.
+            guard isCurrent() else { throw CancellationError() }
+            let replacement = try await renew(true)
+            guard isCurrent() else { throw CancellationError() }
+            let data = try await read(replacement)
+            guard isCurrent() else { throw CancellationError() }
+            return data
+        }
+    }
+}
+
 private final class XNoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
@@ -200,7 +243,7 @@ final class XActivityClient: NSObject, ObservableObject, ASWebAuthenticationPres
                         let code = try XOAuth.authorizationCode(from: callback, expectedState: state)
                         let result = try await self.exchange(["grant_type": "authorization_code", "code": code,
                                                               "redirect_uri": XOAuth.callback, "client_id": clientID,
-                                                              "code_verifier": verifier], previousRefreshToken: nil)
+                                                              "code_verifier": verifier], previousRefreshToken: nil, operationID: id)
                         guard self.operation == id else { return }
                         try XTokenStore.save(result)
                         // A fresh authorization can select a different account.
@@ -218,15 +261,22 @@ final class XActivityClient: NSObject, ObservableObject, ASWebAuthenticationPres
     }
 
     func select(kind: ViralFeedKind, query: String = "#TwitterSurfer OR #Roomwave") {
-        selection = key(kind: kind, query: query)
-        current = currents[selection]
+        do {
+            selection = try key(kind: kind, query: query)
+            current = currents[selection]
+        } catch {
+            selection = ""; current = nil
+            notice = Self.message(for: error)
+        }
     }
 
     func refresh(kind: ViralFeedKind, query: String = "#TwitterSurfer OR #Roomwave") async {
         guard !isLoading else { return }
         guard clientID != nil else { notice = XActivityError.unavailable.message; return }
         guard currentlyConnected else { notice = "Connect X before reading activity. The offline game is ready without an account."; return }
-        let source = key(kind: kind, query: query)
+        let source: String
+        do { source = try key(kind: kind, query: query) }
+        catch { current = nil; notice = Self.message(for: error); return }
         selection = source; current = currents[source]
         let id = UUID(); operation = id; isLoading = true
         defer { if operation == id { isLoading = false } }
@@ -242,9 +292,7 @@ final class XActivityClient: NSObject, ObservableObject, ASWebAuthenticationPres
                 path = "/2/users/\(user)/tweets"
                 items = [URLQueryItem(name: "max_results", value: "10")]
             case .community:
-                let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !value.isEmpty, value.count <= 256,
-                      !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { throw XActivityError.invalidQuery }
+                let value = try XCommunityQuery.normalized(query)
                 path = "/2/tweets/search/recent"
                 items = [URLQueryItem(name: "query", value: value), URLQueryItem(name: "max_results", value: "10")]
             }
@@ -295,7 +343,7 @@ final class XActivityClient: NSObject, ObservableObject, ASWebAuthenticationPres
         let id = operation
         defer { if operation == id { isLoading = false } }
         do {
-            _ = try await request(path: "/2/oauth2/revoke", method: "POST", body: XOAuth.formBody(["token": token, "client_id": revocationClientID]))
+            _ = try await request(path: "/2/oauth2/revoke", method: "POST", body: XOAuth.formBody(["token": token, "client_id": revocationClientID]), operationID: id)
             if operation == id { notice = "Disconnected. X confirmed token revocation; device credentials were removed." }
         } catch {
             if operation == id { notice = "Disconnected on this device. X revocation could not be confirmed; remove this app in X Settings → Security and account access → Apps and sessions." }
@@ -303,22 +351,23 @@ final class XActivityClient: NSObject, ObservableObject, ASWebAuthenticationPres
     }
 
     private func api(path: String, items: [URLQueryItem], operationID: UUID) async throws -> Data {
-        try await renewIfNeeded(operationID: operationID)
-        guard operation == operationID, let token = tokens?.accessToken else { throw XActivityError.unauthorized }
-        do { return try await request(path: path, items: items, bearer: token) }
-        catch XActivityError.unauthorized {
-            try await renewIfNeeded(force: true, operationID: operationID)
-            guard operation == operationID, let replacement = tokens?.accessToken else { throw XActivityError.unauthorized }
-            return try await request(path: path, items: items, bearer: replacement)
-        }
+        try await XAuthorizedRead.perform(isCurrent: { self.operation == operationID }, renew: { force in
+            try await self.renewIfNeeded(force: force, operationID: operationID)
+            guard self.operation == operationID else { throw CancellationError() }
+            guard let stored = self.tokens, stored.clientID == self.clientID else { throw XActivityError.unauthorized }
+            return stored.accessToken
+        }, read: { token in
+            try await self.request(path: path, items: items, bearer: token, operationID: operationID)
+        })
     }
 
     private func renewIfNeeded(force: Bool = false, operationID: UUID) async throws {
-        guard let stored = tokens, let clientID else { throw XActivityError.unauthorized }
+        guard operation == operationID else { throw CancellationError() }
+        guard let stored = tokens, let clientID, stored.clientID == clientID else { throw XActivityError.unauthorized }
         guard force || stored.expiresAt.timeIntervalSinceNow < 60 else { return }
         guard let refresh = stored.refreshToken else { throw XActivityError.unauthorized }
         let replacement = try await exchange(["grant_type": "refresh_token", "refresh_token": refresh,
-                                              "client_id": clientID], previousRefreshToken: refresh)
+                                              "client_id": clientID], previousRefreshToken: refresh, operationID: operationID)
         guard operation == operationID else { throw CancellationError() }
         do { try XTokenStore.save(replacement) }
         catch { tokens = nil; currentlyConnected = false; throw XActivityError.storage }
@@ -326,12 +375,14 @@ final class XActivityClient: NSObject, ObservableObject, ASWebAuthenticationPres
         hasDeviceCredentials = true
     }
 
-    private func exchange(_ values: [String: String], previousRefreshToken: String?) async throws -> XOAuthTokens {
+    private func exchange(_ values: [String: String], previousRefreshToken: String?, operationID: UUID) async throws -> XOAuthTokens {
+        guard operation == operationID else { throw CancellationError() }
         struct Reply: Decodable {
             let token_type: String; let access_token: String; let expires_in: Int
             let refresh_token: String?; let scope: String?
         }
-        let data = try await request(path: "/2/oauth2/token", method: "POST", body: XOAuth.formBody(values))
+        let data = try await request(path: "/2/oauth2/token", method: "POST", body: XOAuth.formBody(values), operationID: operationID)
+        guard operation == operationID else { throw CancellationError() }
         let value = try JSONDecoder().decode(Reply.self, from: data)
         guard let clientID, value.token_type.lowercased() == "bearer", !value.access_token.isEmpty,
               value.access_token.utf8.count <= 8192,
@@ -347,7 +398,8 @@ final class XActivityClient: NSObject, ObservableObject, ASWebAuthenticationPres
                             expiresAt: Date().addingTimeInterval(TimeInterval(value.expires_in)))
     }
 
-    private func request(path: String, method: String = "GET", items: [URLQueryItem] = [], body: Data? = nil, bearer: String? = nil) async throws -> Data {
+    private func request(path: String, method: String = "GET", items: [URLQueryItem] = [], body: Data? = nil, bearer: String? = nil, operationID: UUID) async throws -> Data {
+        guard operation == operationID else { throw CancellationError() }
         var parts = URLComponents(); parts.scheme = "https"; parts.host = "api.x.com"; parts.path = path
         parts.queryItems = items.isEmpty ? nil : items
         guard let url = parts.url else { throw XActivityError.invalidResponse }
@@ -356,6 +408,7 @@ final class XActivityClient: NSObject, ObservableObject, ASWebAuthenticationPres
         if body != nil { request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type") }
         if let bearer { request.setValue("Bearer " + bearer, forHTTPHeaderField: "Authorization") }
         let (bytes, response) = try await http.bytes(for: request)
+        guard operation == operationID else { throw CancellationError() }
         guard let response = response as? HTTPURLResponse, response.url?.scheme == "https", response.url?.host == "api.x.com" else { throw XActivityError.invalidResponse }
         switch response.statusCode {
         case 200...299: break
@@ -373,16 +426,17 @@ final class XActivityClient: NSObject, ObservableObject, ASWebAuthenticationPres
         guard response.expectedContentLength <= Int64(XSnapshotDecoder.maximumBytes) else { throw XActivityError.oversizedResponse }
         var data = Data(); data.reserveCapacity(8192)
         for try await byte in bytes {
+            guard operation == operationID else { throw CancellationError() }
             guard data.count < XSnapshotDecoder.maximumBytes else { throw XActivityError.oversizedResponse }
             data.append(byte)
         }
         return data
     }
 
-    private func key(kind: ViralFeedKind, query: String) -> String {
+    private func key(kind: ViralFeedKind, query: String) throws -> String {
         switch kind {
         case .personal: "personal"
-        case .community: "community:" + query.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .community: "community:" + (try XCommunityQuery.normalized(query))
         }
     }
 

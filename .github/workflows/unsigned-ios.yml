@@ -71,6 +71,14 @@ jobs:
         run: bash scripts/release/validate-native.sh
         env:
           ROOMWAVE_DIAGNOSTIC_RUNTIME: ${{ inputs.runtime_version == '27.0' && '27.0' || '' }}
+      - name: Preserve runner inventory beside native receipts
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if [[ -f build/runner-metal.json ]]; then
+            mkdir -p build/release
+            cp build/runner-metal.json build/release/runner-metal.json
+          fi
       - name: Preserve lightweight native review evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -93,9 +101,12 @@ jobs:
             build/release/native-run-start.json
             build/release/simulator-selection.json
             build/release/native-test.log
-            build/runner-metal.json
+            build/release/runner-metal.json
             build/release/metal-diagnostics.log
             build/release/diagnostic-observer.log
+            build/release/container.log
+            build/release/attachments-export.log
+            build/release/evidence-collection.json
             build/release/recording-observer.log
       - name: Preserve playable evidence and unsigned simulator app
         if: always()

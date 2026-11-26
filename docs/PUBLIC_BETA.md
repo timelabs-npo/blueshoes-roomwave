@@ -12,10 +12,12 @@ The helper is restricted to:
 | Reviewed source | An independently supplied full 40-character source SHA, matching the accepted release receipt |
 | Build | Exact compiled/upload/processing receipt identity and Apple UUID, verified again through live app/prerelease/build reads |
 | Build eligibility | `VALID`, `APP_STORE_ELIGIBLE`, `expired=false`, future expiration |
-| External group | `Roomwave Public Beta`, restricted to the exact build |
+| External group | `Twitter Surfer Public Beta`, external and restricted to the exact build |
 | Public enrollment cap | 200, limit enabled |
 
 The existing 0.2.0 internal pilot cannot pass these identity checks. Another eligible 0.3.0 build cannot substitute for the reviewed source/build either. Receipts and fresh Apple state are both required; neither alone establishes the full promotion identity.
+
+`Twitter Surfer Public Beta` is the helper's configured target name. Creation, exact-build membership and public enrollment still require fresh Apple observations through the applied staging action. Groups with other names remain distinct; the helper does not rename or migrate them. Reconcile any preserved operation intent before staging under a changed target name.
 
 ## Exact release evidence
 

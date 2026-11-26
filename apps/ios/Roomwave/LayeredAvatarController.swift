@@ -93,6 +93,10 @@ final class LayeredAvatarController {
             }
             try Task.checkCancellation()
 
+            // This ordinary art policy is identical on device and simulator.
+            // Reject unsupported imported materials before replacing the visible fallback.
+            let materialStyle = try AvatarOpaqueUnlitStyle.apply(to: asset)
+
             // No reparenting inside the imported hierarchy: retain authored rig bindings.
             fallback.removeFromParent()
             motionContainer.addChild(asset)
@@ -131,6 +135,9 @@ final class LayeredAvatarController {
                     }
                 }
             }
+            #if DEBUG
+            print("AVATAR_MATERIAL_STYLE opaque_unlit models=\(materialStyle.modelCount) slots=\(materialStyle.materialCount) pbr=\(materialStyle.physicallyBasedCount) simple=\(materialStyle.simpleCount) unlit=\(materialStyle.unlitCount) animation_owners=\(animationPlaybacks.count)")
+            #endif
             let hasEmbeddedAnimation = !animationPlaybacks.isEmpty
             assetStatus = "Bundled RoomwavePilot.usdz loaded; four visual layers found; " +
                 (hasEmbeddedAnimation ? "embedded animation + procedural motion." :
@@ -243,5 +250,132 @@ final class LayeredAvatarController {
                                 materials: [UnlitMaterial(color: color)])
         model.position = position
         parent.addChild(model)
+    }
+}
+
+/// Ordinary avatar art policy on simulator and device. The USDZ, mesh resources,
+/// skin bindings and animation owners remain authored; only material slots change.
+@MainActor
+enum AvatarOpaqueUnlitStyle {
+    struct Summary {
+        var modelCount = 0
+        var materialCount = 0
+        var physicallyBasedCount = 0
+        var simpleCount = 0
+        var unlitCount = 0
+    }
+
+    struct Unsupported: LocalizedError {
+        let reason: String
+        var errorDescription: String? { "Opaque avatar styling unavailable: \(reason)" }
+    }
+
+    /// Validate the complete import first, so rejection cannot leave a partly styled asset.
+    static func apply(to root: Entity) throws -> Summary {
+        var pending = [root]
+        var replacements: [(Entity, ModelComponent)] = []
+        var summary = Summary()
+        while let entity = pending.popLast() {
+            pending.append(contentsOf: entity.children.reversed())
+            guard var model = entity.components[ModelComponent.self] else { continue }
+            guard !model.materials.isEmpty else {
+                throw Unsupported(reason: "\(entity.name) has no material slots")
+            }
+            var styled: [any Material] = []
+            for (slot, material) in model.materials.enumerated() {
+                styled.append(try convert(material, location: "\(entity.name)[\(slot)]"))
+                summary.materialCount += 1
+                if material is PhysicallyBasedMaterial { summary.physicallyBasedCount += 1 }
+                else if material is SimpleMaterial { summary.simpleCount += 1 }
+                else if material is UnlitMaterial { summary.unlitCount += 1 }
+            }
+            // Preserve the imported ModelComponent, including its exact mesh resource.
+            model.materials = styled
+            replacements.append((entity, model))
+            summary.modelCount += 1
+        }
+        guard summary.modelCount > 0 else {
+            throw Unsupported(reason: "the import has no renderable models")
+        }
+        for (entity, model) in replacements { entity.components.set(model) }
+        return summary
+    }
+
+    private static func convert(_ material: any Material, location: String) throws -> UnlitMaterial {
+        let tint: UIColor
+        var result: UnlitMaterial
+        switch material {
+        case let value as PhysicallyBasedMaterial:
+            let textures: [(String, Bool)] = [
+                ("base color", value.baseColor.texture != nil),
+                ("roughness", value.roughness.texture != nil),
+                ("metallic", value.metallic.texture != nil),
+                ("normal", value.normal.texture != nil),
+                ("ambient occlusion", value.ambientOcclusion.texture != nil),
+                ("specular", value.specular.texture != nil),
+                ("clearcoat", value.clearcoat.texture != nil),
+                ("clearcoat roughness", value.clearcoatRoughness.texture != nil),
+                ("clearcoat normal", value.clearcoatNormal.texture != nil),
+                ("sheen", value.sheen?.texture != nil),
+                ("anisotropy level", value.anisotropyLevel.texture != nil),
+                ("anisotropy angle", value.anisotropyAngle.texture != nil),
+                ("emissive color", value.emissiveColor.texture != nil),
+                ("subsurface color", value.subsurfaceColor.texture != nil),
+                ("subsurface weight", value.subsurfaceWeight.texture != nil),
+                ("subsurface radius", value.subsurfaceRadius.texture != nil),
+                ("subsurface radius scale", value.subsurfaceRadiusScale.texture != nil),
+                ("subsurface anisotropy", value.subsurfaceScatterAnisotropy.texture != nil),
+                ("bent normal", value.bentNormal.texture != nil)
+            ]
+            if let texture = textures.first(where: { $0.1 }) {
+                throw Unsupported(reason: "\(location) uses an unsupported \(texture.0) texture")
+            }
+            guard case .opaque = value.blending else {
+                throw Unsupported(reason: "\(location) uses transparent PBR blending")
+            }
+            tint = value.baseColor.tint
+            result = UnlitMaterial(color: tint)
+            result.faceCulling = value.faceCulling
+            result.triangleFillMode = value.triangleFillMode
+            result.readsDepth = value.readsDepth
+            result.writesDepth = value.writesDepth
+        case let value as SimpleMaterial:
+            guard value.color.texture == nil,
+                  isConstant(value.roughness), isConstant(value.metallic) else {
+                throw Unsupported(reason: "\(location) uses an unsupported SimpleMaterial texture")
+            }
+            tint = value.color.tint
+            result = UnlitMaterial(color: tint)
+            result.faceCulling = value.faceCulling
+            result.triangleFillMode = value.triangleFillMode
+            result.readsDepth = value.readsDepth
+            result.writesDepth = value.writesDepth
+        case let value as UnlitMaterial:
+            guard value.color.texture == nil else {
+                throw Unsupported(reason: "\(location) uses an unsupported UnlitMaterial texture")
+            }
+            guard case .opaque = value.blending else {
+                throw Unsupported(reason: "\(location) uses transparent unlit blending")
+            }
+            tint = value.color.tint
+            result = value
+        default:
+            throw Unsupported(reason: "\(location) uses unsupported \(String(describing: type(of: material)))")
+        }
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        guard tint.getRed(&red, green: &green, blue: &blue, alpha: &alpha),
+              [red, green, blue, alpha].allSatisfy({ $0.isFinite }),
+              abs(alpha - 1) < 0.000_001 else {
+            throw Unsupported(reason: "\(location) has a nonfinite, non-RGB or nonopaque base tint")
+        }
+        // Use the imported color itself, preserving its color space and components.
+        result.color = .init(tint: tint)
+        result.blending = .opaque
+        return result
+    }
+
+    private static func isConstant(_ parameter: MaterialScalarParameter) -> Bool {
+        if case .float(let value) = parameter { return value.isFinite }
+        return false
     }
 }

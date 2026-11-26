@@ -159,14 +159,41 @@ public enum ViralCourseFactory {
         let definition = base.definition
         let lidar = definition.source == .lidarInspired || definition.source == .xLidarInspired
         var fingerprint = CurrentFingerprint(value: current.seed)
-        fingerprint.add("viral-course-v1")
+        fingerprint.add("viral-course-v2")
+        // Bind every frozen current value that can affect the generated course,
+        // rather than trusting that a decoded aggregate's seed describes it.
+        // Age/freshness are observations at use time, not course identity.
+        fingerprint.add(current.kind.rawValue)
+        fingerprint.add(String(current.intensity.bitPattern))
+        fingerprint.add(String(current.conversation.bitPattern))
+        fingerprint.add(current.velocity.map { String($0.bitPattern) } ?? "unmeasured")
+        fingerprint.add(String(current.observedAt.timeIntervalSince1970.bitPattern))
+        fingerprint.add(String(current.postCount))
+        fingerprint.add(String(current.comparedPostCount))
+        fingerprint.add(String(definition.schemaVersion))
         fingerprint.add(String(definition.seed))
         fingerprint.add(definition.id)
+        fingerprint.add(definition.source.rawValue)
+        fingerprint.add(definition.biome.rawValue)
+        fingerprint.add("samples")
+        fingerprint.add(String(definition.samples.count))
         for sample in definition.samples {
             for number in [sample.distance, sample.center.x, sample.center.y, sample.center.z, sample.width] {
                 fingerprint.add(String(number.bitPattern))
             }
         }
+        fingerprint.add("encounters")
+        fingerprint.add(String(definition.encounters.count))
+        for encounter in definition.encounters {
+            fingerprint.add(String(encounter.id))
+            fingerprint.add(encounter.kind.rawValue)
+            fingerprint.add(String(encounter.distance.bitPattern))
+            fingerprint.add(String(encounter.height.bitPattern))
+            fingerprint.add(String(encounter.halfHeight.bitPattern))
+            fingerprint.add(String(encounter.points))
+        }
+        fingerprint.add("medal-scores")
+        for score in definition.medalScores { fingerprint.add(String(score)) }
         let seed = fingerprint.value
         let phase = Double(seed % 10_000) / 10_000 * 2 * .pi
         let speed = current.velocity.map { min(1, log1p($0) / log1p(10_000)) } ?? 0

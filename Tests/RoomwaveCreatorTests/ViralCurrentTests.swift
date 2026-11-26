@@ -73,6 +73,60 @@ final class ViralCurrentTests: XCTestCase {
         XCTAssertFalse(exported.contains(post().id))
     }
 
+    func testCompetitiveBaseChangesCannotReuseDerivedCourseIdentity() throws {
+        let current = try ViralCurrentBuilder.make(posts: [post()], kind: .personal, now: now)
+        let original = try authored()
+        let definition = original.definition
+        let originalOutput = try ViralCourseFactory.make(base: original, current: current)
+        let first = try XCTUnwrap(definition.encounters.first)
+        var changedRewards = definition.encounters
+        changedRewards[0] = SurfEncounter(id: first.id, kind: first.kind, distance: first.distance,
+            height: first.height, halfHeight: first.halfHeight, points: first.points + 1)
+        var changedHazards = definition.encounters
+        changedHazards[0] = SurfEncounter(id: first.id, kind: first.kind == .barrier ? .ceiling : .barrier,
+            distance: first.distance, height: first.height, halfHeight: first.halfHeight, points: first.points)
+        let variants = [
+            (changedRewards, definition.medalScores),
+            (changedHazards, definition.medalScores),
+            (definition.encounters, definition.medalScores.map { $0 + 1 })
+        ]
+        for (encounters, medals) in variants {
+            let changed = try SurfCourseCompiler.compile(SurfCourseDefinition(
+                id: definition.id, title: definition.title, subtitle: definition.subtitle,
+                biome: definition.biome, source: definition.source, seed: definition.seed,
+                samples: definition.samples, encounters: encounters, medalScores: medals))
+            let output = try ViralCourseFactory.make(base: changed, current: current)
+            XCTAssertNotEqual(output.definition.id, originalOutput.definition.id)
+            XCTAssertNotEqual(output.definition.seed, originalOutput.definition.seed)
+            XCTAssertEqual(output.definition.encounters.map(\.points), encounters.map(\.points))
+            XCTAssertEqual(output.definition.medalScores, medals)
+        }
+    }
+
+    func testChangedDecodedAggregateCannotKeepIdentityByReusingItsSeed() throws {
+        let original = try ViralCurrentBuilder.make(posts: [post()], kind: .personal, now: now)
+        let base = try authored()
+        let first = try ViralCourseFactory.make(base: base, current: original)
+        // The public Codable boundary accepts a syntactically valid aggregate.
+        // Its supplied seed must not override the actual gameplay inputs.
+        for field in ["intensity", "conversation", "velocity"] {
+            let candidate = ViralCurrent(kind: original.kind,
+                intensity: field == "intensity" ? 0.99 : original.intensity,
+                conversation: field == "conversation" ? 0.99 : original.conversation,
+                velocity: field == "velocity" ? 1 : original.velocity,
+                observedAt: original.observedAt, freshness: original.freshness,
+                ageSeconds: original.ageSeconds, postCount: original.postCount,
+                comparedPostCount: field == "velocity" ? 1 : original.comparedPostCount,
+                seed: original.seed)
+            let changed = try JSONDecoder().decode(ViralCurrent.self, from: JSONEncoder().encode(candidate))
+            XCTAssertEqual(changed.seed, original.seed)
+            let output = try ViralCourseFactory.make(base: base, current: changed)
+            XCTAssertNotEqual(output.definition.id, first.definition.id)
+            XCTAssertNotEqual(output.definition.samples, first.definition.samples)
+            XCTAssertEqual(SurfSimulation.start(course: output).score, 0)
+        }
+    }
+
     func testVelocityUsesOnlySamePostElapsedIntervalsAndClampsCorrectedCounters() throws {
         let previous = [post(likes: 200, reposts: 1, replies: 3, quotes: 2, age: 120),
                         post("1991234567890123499", likes: 0, age: 120)]
