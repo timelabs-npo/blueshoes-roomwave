@@ -27,8 +27,8 @@
   "public_configuration": {
     "github_repository_variable": "X_OAUTH_CLIENT_ID",
     "ios_info_plist_key": "XOAuthClientID",
-    "client_id_status": "owner_supplied_public_id_configured_in_source",
-    "repository_variable_write": "403_integration_permission; public source setting used"
+    "client_id_status": "owner_supplied_public_id_configured_in_source_and_repository_variable",
+    "repository_variable_write": "configured_via_owner_authorized_setup_after_initial_integration_403"
   },
   "endpoints": {
     "authorization": "https://x.com/i/oauth2/authorize",
