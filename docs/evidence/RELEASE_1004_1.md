@@ -99,9 +99,9 @@ were verified; contact values and proposed metadata are omitted from this record
 
 Both the preflight and fresh reconciliation observed the existing build as
 `VALID`, `APP_STORE_ELIGIBLE` and `READY_FOR_BETA_SUBMISSION`. For the target
-external-beta configuration, the inspected group and review/submission IDs were
-absent, exact-build association was false, metadata staging was incomplete and
-the public link was disabled. Automatic notification remained enabled. Review
+external-beta configuration, the inspected `group_id` and `review_submission_id`
+were null, exact-build association was false, metadata staging was incomplete and
+no enabled public link was observed. Automatic notification remained enabled. Review
 contact presence and availability remained true.
 
 The staging report's empty `mutations` list records no confirmed completed
