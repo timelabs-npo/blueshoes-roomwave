@@ -166,6 +166,8 @@ def main():
     native = one("native-test.log")
     pattern = re.compile(r"XActivityClientTests|Test (?:Case|Suite)|Executed \d|TEST (?:SUCCEEDED|FAILED)|error:|GPU|METAL|SimMetalHost|Compiler failed|renderPipeline|render.target|Critical process|not running|Timed out|timeout", re.I)
     native_lines = text(native, 33554432).splitlines()
+    asset_lines = [(i + 1, line[:1000]) for i, line in enumerate(native_lines) if "ASSET_TREE " in line]
+    emit({"asset_tree_lines": asset_lines[:180], "asset_tree_total": len(asset_lines)})
     hits = [(i + 1, line[:650]) for i, line in enumerate(native_lines) if pattern.search(line)]
     ui_start = next((i for i, line in enumerate(native_lines) if "Test Case '-[RoomwaveUITests.ArcadeFlowUITests" in line and "started." in line), None)
     if ui_start is not None:
