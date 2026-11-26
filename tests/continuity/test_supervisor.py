@@ -275,6 +275,109 @@ result.write_text("Worker claim only; independent review still required.")
         with self.assertRaisesRegex(s.Problem, "observed Apple public"):
             s.record_release(self.store, record)
 
+    def release_receipt(self, **changes):
+        return {"app_id": "6837899703", "version": "0.3.0", "build": "1003.1", "source_sha": self.sha,
+                "state": "DISPATCHED", "observed_at": "2026-11-26T10:00:00Z", "evidence": "Trusted operator receipt",
+                "workflow_run_id": "45774527262", "workflow_run_number": 3, "workflow_run_attempt": 1,
+                "allocation_id": "github:timelabs-npo/blueshoes-roomwave:45774527262:1", **changes}
+
+    def public_release_receipt(self, **changes):
+        return self.release_receipt(state="PUBLIC_BETA", **{
+            "apple_build_id": "11111111-2222-3333-4444-555555555555", "review_submission_id": "review-id",
+            "group_id": "external-group", "public_url": "https://testflight.apple.com/join/Observed123",
+            "apple_external_approval_observed": True, "review_state": "APPROVED",
+            "external_build_state": "IN_BETA_TESTING", "public_link_enabled": True,
+            "exact_build_associated": True, "external_testing_active": True,
+            "tester_access_verified": False, **changes})
+
+    def assert_release_rejected_unchanged(self, receipt, message=None):
+        before = self.store.read()
+        with self.assertRaisesRegex(s.Problem, message or ".+"):
+            s.record_release(self.store, receipt)
+        self.assertEqual(self.store.read(), before)
+
+    def test_release_binds_run_attempt_allocation_and_rejects_same_stage_replacement(self):
+        record = self.release_receipt()
+        s.claim_release(self.store, record)
+        s.record_release(self.store, record)
+        changes = (
+            {"workflow_run_id": "45774527263", "allocation_id": "github:timelabs-npo/blueshoes-roomwave:45774527263:1"},
+            {"workflow_run_attempt": 2}, {"workflow_run_number": 99},
+            {"allocation_id": "github:timelabs-npo/blueshoes-roomwave:45774527263:1"},
+            {"run_attempt": 2}, {"run_number": 99}, {"run_id": "45774527263"},
+            {"workflow_run_id": True}, {"workflow_run_number": True}, {"workflow_run_attempt": True},
+        )
+        for change in changes:
+            with self.subTest(change=change):
+                self.assert_release_rejected_unchanged({**record, "observed_at": "2026-11-26T10:00:01Z", **change})
+        for field in s.RELEASE_RUN_FIELDS:
+            with self.subTest(omitted=field):
+                missing = {key: value for key, value in record.items() if key != field}
+                self.assert_release_rejected_unchanged(missing, "identity changed or was omitted")
+
+    def test_release_rejects_stale_and_same_timestamp_conflicts_without_changing_state(self):
+        record = self.release_receipt()
+        s.claim_release(self.store, record)
+        s.record_release(self.store, record)
+        self.assert_release_rejected_unchanged({**record, "observed_at": "2026-11-26T09:59:59Z"}, "Stale")
+        self.assert_release_rejected_unchanged({**record, "evidence": "Different assertion"}, "same timestamp")
+        self.assert_release_rejected_unchanged({**record, "state": "UPLOADED", "apple_build_id": "observed-build"}, "same timestamp")
+        repeated = s.record_release(self.store, record)
+        self.assertEqual(repeated["workflow_run_attempt"], 1)
+        newer = s.record_release(self.store, {**record, "observed_at": "2026-11-26T10:00:01Z"})
+        self.assertEqual(newer["run_identity_evidence"], "observed_allocation")
+        self.assertEqual(newer["observed_at"], "2026-11-26T10:00:01Z")
+
+    def test_legacy_release_identity_stays_unproven_until_explicit_bindings_observed(self):
+        canonical = self.release_receipt()
+        record = {key: value for key, value in canonical.items() if key not in s.RELEASE_RUN_FIELDS}
+        s.claim_release(self.store, record)
+        legacy = s.record_release(self.store, record)
+        self.assertEqual(legacy["run_identity_evidence"], "legacy_unproven")
+        for field in s.RELEASE_RUN_FIELDS:
+            self.assertNotIn(field, legacy)
+        partial = s.record_release(self.store, {**record, "workflow_run_id": 45774527262,
+                                               "observed_at": "2026-11-26T10:00:01Z"})
+        self.assertEqual(partial["workflow_run_id"], "45774527262")
+        self.assertEqual(partial["run_identity_evidence"], "legacy_unproven")
+        self.assertNotIn("workflow_run_attempt", partial)
+        observed = s.record_release(self.store, {**canonical, "observed_at": "2026-11-26T10:00:02Z"})
+        self.assertEqual(observed["run_identity_evidence"], "observed_allocation")
+
+    def test_public_beta_rejects_missing_false_or_contradictory_availability_flags(self):
+        record = self.public_release_receipt()
+        s.claim_release(self.store, record)
+        for field in ("apple_external_approval_observed", "public_link_enabled", "exact_build_associated", "external_testing_active"):
+            for value in (False, None, "true", 1):
+                with self.subTest(field=field, value=value):
+                    self.assert_release_rejected_unchanged({**record, field: value})
+            with self.subTest(missing=field):
+                self.assert_release_rejected_unchanged({key: value for key, value in record.items() if key != field})
+        for change in ({"review_state": "WAITING_FOR_REVIEW"}, {"external_build_state": "BETA_APPROVED"},
+                       {"external_build_state": "READY_FOR_BETA_TESTING"}):
+            with self.subTest(change=change):
+                self.assert_release_rejected_unchanged({**record, **change})
+        for field in s.RELEASE_RUN_FIELDS:
+            with self.subTest(missing=field):
+                self.assert_release_rejected_unchanged({key: value for key, value in record.items() if key != field}, "unproven")
+
+    def test_public_link_enabled_remains_separate_until_active_external_beta_observed(self):
+        record = self.public_release_receipt()
+        s.claim_release(self.store, record)
+        linked = {**record, "state": "PUBLIC_LINK_ENABLED", "external_build_state": "BETA_APPROVED",
+                  "external_testing_active": False}
+        result = s.record_release(self.store, linked)
+        self.assertEqual(result["state"], "PUBLIC_LINK_ENABLED")
+        self.assertFalse(result["external_testing_active"])
+        self.assertFalse(result["tester_access_verified"])
+        self.assert_release_rejected_unchanged({**linked, "state": "PUBLIC_BETA",
+                                               "observed_at": "2026-11-26T10:00:01Z"}, "active external testing")
+        active = s.record_release(self.store, {**record, "observed_at": "2026-11-26T10:00:02Z"})
+        self.assertEqual(active["state"], "PUBLIC_BETA")
+        for field in ("apple_external_approval_observed", "public_link_enabled", "exact_build_associated", "external_testing_active"):
+            self.assertTrue(active[field])
+        self.assertFalse(active["tester_access_verified"])
+
     def test_known_external_blockers_never_run(self):
         gate = {"schema_version": 1, "task_id": "external-contact", "kind": "gate", "base_sha": self.sha,
                 "state": "BLOCKED_INPUT", "reason": "Review contact empty", "required_evidence": ["Real contact"],

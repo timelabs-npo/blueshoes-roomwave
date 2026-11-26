@@ -669,35 +669,100 @@ def claim_release(store, record):
         return item
 
 
+RELEASE_RUN_FIELDS = ("workflow_run_id", "workflow_run_number", "workflow_run_attempt", "allocation_id")
+RELEASE_PUBLIC_FLAGS = ("apple_external_approval_observed", "public_link_enabled", "external_testing_active",
+                        "exact_build_associated", "tester_access_verified", "promotion_evidence_verified")
+
+
+def release_run_observation(record):
+    """Keep absent legacy bindings absent; normalize only explicitly supplied fields."""
+    result = {}
+    for canonical, alias in (("workflow_run_id", "run_id"), ("workflow_run_number", "run_number"),
+                             ("workflow_run_attempt", "run_attempt")):
+        for field in (canonical, alias):
+            if field not in record:
+                continue
+            value = record[field]
+            if canonical == "workflow_run_id":
+                if not (type(value) is int or isinstance(value, str)) or not re.fullmatch(r"[1-9][0-9]{0,19}", str(value)):
+                    raise Problem("Release workflow_run_id must be an observed positive numeric run ID")
+                value = str(value)
+            elif type(value) is not int or not 1 <= value <= (8999 if canonical == "workflow_run_number" else 1):
+                raise Problem("Release workflow number/attempt must match the first-attempt allocation")
+            if canonical in result and result[canonical] != value:
+                raise Problem("Conflicting release workflow aliases")
+            result[canonical] = value
+    if "workflow_run_number" in result and record["build"] != f'{1000 + result["workflow_run_number"]}.1':
+        raise Problem("Release build differs from the observed workflow allocation")
+    if "allocation_id" in record:
+        allocation = record["allocation_id"]
+        match = re.fullmatch(r"github:timelabs-npo/blueshoes-roomwave:([1-9][0-9]{0,19}):1", allocation) if isinstance(allocation, str) else None
+        if not match or ("workflow_run_id" in result and match[1] != result["workflow_run_id"]):
+            raise Problem("Release allocation ID conflicts with the observed workflow")
+        result["allocation_id"] = allocation
+    return result
+
+
 def record_release(store, record):
     key = release_key(record)
     stages = ["INTENT_RECORDED", "DISPATCHED", "UPLOADED", "PROCESSING", "VALID",
-              "EXTERNAL_REVIEW_PENDING", "EXTERNAL_APPROVED", "PUBLIC_BETA"]
+              "EXTERNAL_REVIEW_PENDING", "EXTERNAL_APPROVED", "PUBLIC_LINK_ENABLED", "PUBLIC_BETA"]
     target = record.get("state")
     if target not in stages:
         raise Problem("Unknown release observation state")
     if not record.get("evidence") or not record.get("observed_at"):
         raise Problem("Release observations require evidence and observed_at, not an inferred success")
-    instant(record["observed_at"])
+    observed_at = instant(record["observed_at"])
     if stages.index(target) >= stages.index("UPLOADED") and not record.get("apple_build_id"):
         raise Problem("Uploaded/review observations require the exact Apple build ID")
-    if target == "PUBLIC_BETA" and not re.fullmatch(r"https://testflight\.apple\.com/join/[A-Za-z0-9]+", record.get("public_url", "")):
-        raise Problem("PUBLIC_BETA requires an observed Apple public TestFlight URL")
+    public = target in ("PUBLIC_LINK_ENABLED", "PUBLIC_BETA")
+    if public and not re.fullmatch(r"https://testflight\.apple\.com/join/[A-Za-z0-9]+", record.get("public_url", "")):
+        raise Problem("Public beta observations require an observed Apple public TestFlight URL")
     if stages.index(target) >= stages.index("EXTERNAL_REVIEW_PENDING"):
         if not record.get("review_submission_id") or not record.get("group_id"):
             raise Problem("External beta observations require exact review submission and group IDs")
+    run = release_run_observation(record)
+    for field in RELEASE_PUBLIC_FLAGS:
+        if field in record and type(record[field]) is not bool:
+            raise Problem(f"Release {field} requires an explicit boolean observation")
+    if public:
+        if len(run) != len(RELEASE_RUN_FIELDS):
+            raise Problem("Public beta requires a complete observed workflow allocation; legacy identity is unproven")
+        if (record.get("apple_external_approval_observed") is not True
+                or record.get("review_state") != "APPROVED"
+                or record.get("external_build_state") not in ("BETA_APPROVED", "IN_BETA_TESTING")
+                or record.get("public_link_enabled") is not True
+                or record.get("exact_build_associated") is not True):
+            raise Problem("Public beta requires observed approval, enabled link and exact group/build membership")
+        active = record.get("external_build_state") == "IN_BETA_TESTING"
+        if record.get("external_testing_active") is not active or (target == "PUBLIC_BETA" and not active):
+            raise Problem("PUBLIC_BETA requires observed active external testing; an enabled link alone is insufficient")
+    fields = ("state", "evidence", "observed_at", "apple_build_id", "review_submission_id", "group_id", "public_url",
+              "review_state", "external_build_state", *RELEASE_PUBLIC_FLAGS)
+    observation = {field: record[field] for field in fields if field in record}
+    observation.update(run)
+    observation["run_identity_evidence"] = "observed_allocation" if len(run) == len(RELEASE_RUN_FIELDS) else "legacy_unproven"
     with store.writer():
         state = store.read()
         old = state["releases"].get(key)
         if old is None or old["source_sha"] != record["source_sha"]:
             raise Problem("Release observation must match an existing claim and exact source SHA")
+        previous_run = release_run_observation(old)
+        if any(run.get(field) != value for field, value in previous_run.items()):
+            raise Problem("Release workflow run/attempt/allocation identity changed or was omitted")
+        if old.get("observed_at"):
+            previous_time = instant(old["observed_at"])
+            if observed_at < previous_time:
+                raise Problem("Stale release observation cannot overwrite a newer receipt")
+            if observed_at == previous_time and any(field in old and old[field] != value
+                    for field, value in observation.items() if field not in RELEASE_RUN_FIELDS
+                    and field not in ("observed_at", "run_identity_evidence")):
+                raise Problem("Conflicting release observations at the same timestamp")
         if stages.index(target) < stages.index(old["state"]):
             raise Problem("Release state cannot regress")
         if old.get("apple_build_id") and old["apple_build_id"] != record.get("apple_build_id"):
             raise Problem("Apple build identity changed")
-        for field in ("state", "evidence", "observed_at", "apple_build_id", "workflow_run_id", "review_submission_id", "group_id", "public_url"):
-            if field in record:
-                old[field] = record[field]
+        old = {**old, **observation}
         state["releases"][key] = old
         store.save(state)
         return old
