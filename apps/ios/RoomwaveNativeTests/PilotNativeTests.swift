@@ -27,6 +27,11 @@ final class PilotNativeTests: XCTestCase {
         await avatar.loadBundledAsset()
         XCTAssertTrue(avatar.assetStatus.hasPrefix("Bundled RoomwavePilot.usdz loaded"),
                       avatar.assetStatus)
+        let styledModels = allEntities(in: avatar.root).compactMap { $0.components[ModelComponent.self] }
+        XCTAssertEqual(styledModels.count, 4)
+        XCTAssertTrue(styledModels.allSatisfy { model in
+            !model.materials.isEmpty && model.materials.allSatisfy { $0 is UnlitMaterial }
+        }, "Ordinary controller loading must apply the same style used by the focused tests")
         avatar.root.position = SIMD3(4, 1, 7)
         avatar.setLayerVisibility(skeleton: true, muscle: true, skin: false, coat: false)
         XCTAssertEqual(avatar.root.findEntity(named: "SkeletonOverlay")?.isEnabled, true)
@@ -44,6 +49,153 @@ final class PilotNativeTests: XCTestCase {
         avatar.setLayerVisibility(skeleton: false, muscle: false, skin: true, coat: true)
         XCTAssertEqual(avatar.root.findEntity(named: "Skin")?.isEnabled, true)
         XCTAssertEqual(avatar.root.findEntity(named: "Coat")?.isEnabled, true)
+    }
+
+    @MainActor
+    func testOpaqueAvatarStylePreservesTintsSlotsAndMesh() throws {
+        var pbr = PhysicallyBasedMaterial()
+        pbr.baseColor = .init(tint: UIColor(red: 0.12, green: 0.38, blue: 0.72, alpha: 1))
+        pbr.faceCulling = .none
+        pbr.readsDepth = false
+        pbr.writesDepth = false
+        let simple = SimpleMaterial(color: UIColor(red: 0.68, green: 0.21, blue: 0.36, alpha: 1),
+                                    roughness: 0.7, isMetallic: false)
+        let unlit = UnlitMaterial(color: UIColor(red: 0.17, green: 0.76, blue: 0.42, alpha: 1))
+        let original: [any Material] = [pbr, simple, unlit, pbr, simple, unlit]
+        let mesh = MeshResource.generateBox(width: 0.2, height: 0.3, depth: 0.4,
+                                            cornerRadius: 0, splitFaces: true)
+        let model = ModelEntity(mesh: mesh, materials: original)
+        model.position = SIMD3(3, 2, 1)
+        model.scale = SIMD3(0.8, 1.2, 0.9)
+        let originalTransform = model.transform
+        let summary = try AvatarOpaqueUnlitStyle.apply(to: model)
+        let after = try XCTUnwrap(model.components[ModelComponent.self])
+        XCTAssertTrue(after.mesh === mesh)
+        XCTAssertEqual(after.materials.count, original.count)
+        XCTAssertEqual(summary.modelCount, 1)
+        XCTAssertEqual(summary.materialCount, 6)
+        XCTAssertEqual(summary.physicallyBasedCount, 2)
+        XCTAssertEqual(summary.simpleCount, 2)
+        XCTAssertEqual(summary.unlitCount, 2)
+        XCTAssertEqual(model.position, originalTransform.translation)
+        XCTAssertEqual(model.scale, originalTransform.scale)
+        XCTAssertEqual(model.orientation.vector, originalTransform.rotation.vector)
+        for (before, material) in zip(original, after.materials) {
+            let styled = try XCTUnwrap(material as? UnlitMaterial)
+            assertSameTint(try importedTint(before), styled.color.tint)
+            XCTAssertNil(styled.color.texture)
+            XCTAssertEqual(styled.blending, .opaque)
+        }
+        let first = try XCTUnwrap(after.materials.first as? UnlitMaterial)
+        XCTAssertEqual(first.faceCulling, .none)
+        XCTAssertFalse(first.readsDepth)
+        XCTAssertFalse(first.writesDepth)
+    }
+
+    @MainActor
+    func testOpaqueAvatarStyleRejectsUnsupportedInputAtomically() async throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2), format: format)
+            .image { context in
+                UIColor.white.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+            }
+        let texture = try await TextureResource(image: XCTUnwrap(image.cgImage), withName: nil,
+                                               options: .init(semantic: .color))
+        var baseTexture = PhysicallyBasedMaterial()
+        baseTexture.baseColor = .init(tint: .white, texture: .init(texture))
+        var normalTexture = PhysicallyBasedMaterial()
+        normalTexture.normal = .init(texture: .init(texture))
+        var simpleTexture = SimpleMaterial(color: .white, isMetallic: false)
+        simpleTexture.roughness = .texture(texture)
+        var unlitTexture = UnlitMaterial(color: .white)
+        unlitTexture.color = .init(tint: .white, texture: .init(texture))
+        let translucent = UnlitMaterial(color: UIColor.white.withAlphaComponent(0.5))
+        let rejected: [any Material] = [
+            baseTexture, normalTexture, simpleTexture, unlitTexture, translucent, OcclusionMaterial()
+        ]
+        for material in rejected {
+            let root = Entity()
+            let first = ModelEntity(mesh: .generateBox(size: 0.1),
+                                    materials: [SimpleMaterial(color: .red, isMetallic: false)])
+            let second = ModelEntity(mesh: .generateBox(size: 0.1), materials: [material])
+            root.addChild(first)
+            root.addChild(second)
+            XCTAssertThrowsError(try AvatarOpaqueUnlitStyle.apply(to: root))
+            let unchanged = try XCTUnwrap(first.components[ModelComponent.self])
+            XCTAssertTrue(unchanged.materials.first is SimpleMaterial,
+                          "A later rejected slot must not leave earlier entities partly styled")
+            XCTAssertTrue(first.parent === root)
+            XCTAssertTrue(second.parent === root)
+        }
+    }
+
+    @MainActor
+    func testBundledOpaqueStylePreservesLayersMeshAndAnimationOwnership() async throws {
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "RoomwavePilot", withExtension: "usdz", subdirectory: "Assets")
+            ?? Bundle.main.url(forResource: "RoomwavePilot", withExtension: "usdz"))
+        let asset = try await Entity(contentsOf: url)
+        let entities = allEntities(in: asset)
+        let identities = entities.map { ObjectIdentifier($0) }
+        let parents = entities.map { $0.parent.map { ObjectIdentifier($0) } }
+        let poses = entities.map(\.transform)
+        let animations = entities.map { $0.availableAnimations.map { $0.name } }
+        let models = try entities.compactMap { entity -> (Entity, ModelComponent, [UIColor])? in
+            guard let model = entity.components[ModelComponent.self] else { return nil }
+            return (entity, model, try model.materials.map { try importedTint($0) })
+        }
+        XCTAssertEqual(models.count, 4, "The authored four-layer import must remain intact")
+        let summary = try AvatarOpaqueUnlitStyle.apply(to: asset)
+        XCTAssertEqual(summary.modelCount, models.count)
+        XCTAssertEqual(summary.materialCount, models.reduce(0) { $0 + $1.1.materials.count })
+        XCTAssertEqual(allEntities(in: asset).map { ObjectIdentifier($0) }, identities)
+        for (index, entity) in entities.enumerated() {
+            XCTAssertEqual(entity.parent.map { ObjectIdentifier($0) }, parents[index])
+            XCTAssertEqual(entity.position, poses[index].translation)
+            XCTAssertEqual(entity.scale, poses[index].scale)
+            XCTAssertEqual(entity.orientation.vector, poses[index].rotation.vector)
+            XCTAssertEqual(entity.availableAnimations.map { $0.name }, animations[index])
+        }
+        for name in ["Skin", "Coat", "SkeletonOverlay", "MuscleOverlay"] {
+            let layer = try XCTUnwrap(entities.first { $0.name == name })
+            XCTAssertNotNil(layer.components[ModelComponent.self])
+            XCTAssertEqual(layer.availableAnimations.count, 3)
+            XCTAssertEqual(layer.availableAnimations.first?.name,
+                           "/RoomwavePilot/\(name)/RoomwaveGlide[0]")
+        }
+        for (entity, original, colors) in models {
+            let after = try XCTUnwrap(entity.components[ModelComponent.self])
+            XCTAssertTrue(after.mesh === original.mesh)
+            XCTAssertEqual(after.materials.count, original.materials.count)
+            for (color, material) in zip(colors, after.materials) {
+                let styled = try XCTUnwrap(material as? UnlitMaterial)
+                assertSameTint(color, styled.color.tint)
+                XCTAssertEqual(styled.blending, .opaque)
+            }
+        }
+    }
+
+    @MainActor
+    private func importedTint(_ material: any Material) throws -> UIColor {
+        if let value = material as? PhysicallyBasedMaterial { return value.baseColor.tint }
+        if let value = material as? SimpleMaterial { return value.color.tint }
+        if let value = material as? UnlitMaterial { return value.color.tint }
+        XCTFail("The known fixture must expose a supported base tint")
+        throw AvatarOpaqueUnlitStyle.Unsupported(reason: "unexpected fixture material")
+    }
+
+    @MainActor
+    private func assertSameTint(_ expected: UIColor, _ actual: UIColor,
+                                file: StaticString = #filePath, line: UInt = #line) {
+        var er: CGFloat = 0, eg: CGFloat = 0, eb: CGFloat = 0, ea: CGFloat = 0
+        var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
+        XCTAssertTrue(expected.getRed(&er, green: &eg, blue: &eb, alpha: &ea), file: file, line: line)
+        XCTAssertTrue(actual.getRed(&ar, green: &ag, blue: &ab, alpha: &aa), file: file, line: line)
+        for (lhs, rhs) in zip([er, eg, eb, ea], [ar, ag, ab, aa]) {
+            XCTAssertEqual(lhs, rhs, accuracy: 0.000_001, file: file, line: line)
+        }
     }
 
     @MainActor

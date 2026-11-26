@@ -58,12 +58,9 @@ final class ArcadeSceneController: ArcadeSceneDriving {
 
     init() {
         arView = ARView(frame: .zero, cameraMode: .nonAR, automaticallyConfigureSession: false)
-        #if targetEnvironment(simulator)
-        // Simulator translates Metal through the host GPU and lacks some device
-        // shader features. Keep the authored contact patch below, without adding
-        // RealityKit's automatic grounding-shadow pass on this render target.
+        // The rider uses the authored contact patch below. Automatic grounding
+        // shadows duplicate that cue and add an unnecessary rendering pass.
         arView.renderOptions.insert(.disableGroundingShadows)
-        #endif
         arView.environment.background = .color(ArcadeGeometry.rgb(0.018, 0.025, 0.06))
         arView.environment.lighting.intensityExponent = 0.7
         // The portrait FOV is explicit, avoiding aspect-dependent horizontal framing.

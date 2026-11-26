@@ -18,6 +18,7 @@ import tempfile
 
 APP = "6837899703"
 BUNDLE = "org.timelabs.moleculefoundry"
+TEAM = "398XACWZ7G"
 REPOSITORY = "timelabs-npo/blueshoes-roomwave"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -138,7 +139,22 @@ class Allocation:
                 and compiled.get("identity_verified") is True
                 and compiled.get("usesNonExemptEncryption") is False,
                 "Compiled binary identity differs from the allocation")
-        return path, digest(path)
+        checksum = digest(path)
+        signature = read_json(self.directory / "exported-signature.json")
+        require(signature.get("app_id") == APP and signature.get("bundle_identifier") == BUNDLE
+                and signature.get("version") == allocation["version"]
+                and signature.get("build") == allocation["build"] and signature.get("team_id") == TEAM
+                and signature.get("ipa_sha256") == checksum and signature.get("signature_verified") is True
+                and signature.get("distribution_profile_verified") is True
+                and isinstance(signature.get("signer_certificate_sha256"), str)
+                and DIGEST.fullmatch(signature["signer_certificate_sha256"]),
+                "Exported signature receipt differs from this exact signed IPA")
+        symbols = self.directory / "Roomwave-dSYMs.zip"
+        require(symbols.is_file() and not symbols.is_symlink()
+                and signature.get("dsym_verified") is True
+                and signature.get("dsym_sha256") == digest(symbols),
+                "Debug symbols differ from the UUID-verified archive")
+        return path, checksum
 
     def record_export(self):
         allocation = self.read()
@@ -146,7 +162,10 @@ class Allocation:
         receipt = {"commit": allocation["source_sha"], "app_store_app_id": APP,
                    "bundle_identifier": BUNDLE, "version": allocation["version"],
                    "build": allocation["build"], "signature_verified": True,
-                   "ipa_sha256": checksum, "upload_accepted": False,
+                   "ipa_sha256": checksum,
+                   "signature_receipt_sha256": digest(self.directory / "exported-signature.json"),
+                   "dsym_sha256": digest(self.directory / "Roomwave-dSYMs.zip"),
+                   "upload_accepted": False,
                    "tester_access_verified": False, "observed_utc": stamp(),
                    **{key: allocation[key] for key in ("allocation_id", "workflow_run_id",
                       "workflow_run_number", "workflow_run_attempt")}}
@@ -159,7 +178,9 @@ class Allocation:
                   "bundle_identifier": BUNDLE, "version": allocation["version"],
                   "build": allocation["build"], "ipa_sha256": checksum,
                   "allocation_id": allocation["allocation_id"],
-                  "workflow_run_id": allocation["workflow_run_id"]}
+                  "workflow_run_id": allocation["workflow_run_id"],
+                  "dsym_sha256": digest(self.directory / "Roomwave-dSYMs.zip"),
+                  "signature_receipt_sha256": digest(self.directory / "exported-signature.json")}
         require(all(receipt.get(key) == value for key, value in fields.items())
                 and receipt.get("signature_verified") is True,
                 "Export receipt does not identify this exact binary and allocation")
@@ -172,6 +193,8 @@ class Allocation:
         receipt = self.export_receipt(allocation, checksum)
         require(receipt.get("upload_accepted") is False, "Upload was already accepted; reconcile it")
         value = {**allocation, "ipa_filename": path.name, "ipa_sha256": checksum,
+                 "signature_receipt_sha256": receipt["signature_receipt_sha256"],
+                 "dsym_sha256": receipt["dsym_sha256"],
                  "intent_recorded_at_utc": stamp(), "state": "UPLOAD_INTENT_RECORDED"}
         write_once(self.directory / "upload-intent.json", value)
         return value
@@ -184,6 +207,8 @@ class Allocation:
                 "Upload intent does not match the persisted allocation")
         path, checksum = self.binary(allocation)
         require(intent.get("ipa_filename") == path.name and intent.get("ipa_sha256") == checksum
+                and intent.get("signature_receipt_sha256") == digest(self.directory / "exported-signature.json")
+                and intent.get("dsym_sha256") == digest(self.directory / "Roomwave-dSYMs.zip")
                 and DIGEST.fullmatch(checksum), "Signed binary changed after upload intent")
         receipt = self.export_receipt(allocation, checksum)
         require(receipt.get("upload_accepted") is False, "Upload already accepted; never upload again to reconcile")

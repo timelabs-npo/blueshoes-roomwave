@@ -24,11 +24,11 @@ enum ArcadeSharing {
         renderer.scale = 2
         guard let image = renderer.uiImage else { throw ShareError.renderFailed }
         let medalText = result.medal == .none ? "No medal" : "\(result.medal.rawValue.capitalized) medal"
-        let text = "ROOMWAVE · SLIPSTREAM\n\(title) · \(result.score.formatted()) points\n"
+        let text = "TWITTER SURFER\n\(title) · \(result.score.formatted()) points\n"
             + "\(result.completed ? "Complete" : "Run ended") · \(medalText)\n"
             + "\(result.rings) rings · \(result.perfectLandings) perfect landings · ×\(result.bestCombo) best combo\n"
             + "Rules: \(result.rulesVersion)\n"
-            + (url == nil ? "A locally created course; no shared challenge link in this beta." : "Play this course in Roomwave.")
+            + (url == nil ? "A locally created course; no shared challenge link in this beta." : "Play this course in Twitter Surfer.")
         return ArcadeSharePayload(image: image, text: text, challenge: url)
     }
 
@@ -38,7 +38,7 @@ enum ArcadeSharing {
         guard result.rulesVersion == SurfRules.standard.version else { return nil }
         var components = URLComponents()
         components.scheme = "https"; components.host = "x.com"; components.path = "/intent/tweet"
-        let text = "\(result.score) points in ROOMWAVE · \(title). \(result.rings) rings, \(result.perfectLandings) perfect landings. #indiedev #iOSgaming"
+        let text = "\(result.score) points in Twitter Surfer · \(title). \(result.rings) rings, \(result.perfectLandings) perfect landings. #indiedev #iOSgaming"
         components.queryItems = [URLQueryItem(name: "text", value: text),
             URLQueryItem(name: "url", value: "https://github.com/timelabs-npo/blueshoes-roomwave")]
         return components.url
@@ -91,8 +91,8 @@ private struct ArcadeResultCard: View {
             }.stroke(teal.opacity(0.20), lineWidth: 44)
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("ROOMWAVE").font(.system(size: 33, weight: .black, design: .rounded)).tracking(4)
-                    Text("S L I P S T R E A M").font(.system(size: 12, weight: .medium)).foregroundStyle(teal)
+                    Text("TWITTER SURFER").font(.system(size: 33, weight: .black, design: .rounded)).tracking(4)
+                    Text("RIDE THE CURRENT").font(.system(size: 12, weight: .medium)).foregroundStyle(teal)
                 }
                 Spacer()
                 Text(title.uppercased()).font(.system(size: 18, weight: .bold)).tracking(3)

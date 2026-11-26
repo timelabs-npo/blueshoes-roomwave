@@ -249,7 +249,7 @@ class PublicBetaTests(unittest.TestCase):
         result = self.scenario(action="stage", apply=True)
         self.assertEqual(result["results"][-1]["state"], "STAGED_PRIVATE")
         group = result["state"]["groups"][-1]["attributes"]
-        self.assertEqual(group["name"], "Roomwave Public Beta")
+        self.assertEqual(group["name"], "Twitter Surfer Public Beta")
         self.assertEqual(group["publicLinkLimit"], 200)
         self.assertFalse(group["publicLinkEnabled"])
         self.assertFalse(group["isInternalGroup"])
@@ -316,13 +316,13 @@ class PublicBetaTests(unittest.TestCase):
         result = self.scenario("lost-create")
         self.assertEqual(result["results"][-1]["state"], "BLOCKED_RECONCILE")
         self.assertEqual(sum(row["path"] == "betaGroups" and row["method"] == "POST" for row in result["calls"]), 1)
-        self.assertEqual(result["journal"]["intents"]["group:6837899703:Roomwave Public Beta"]["state"], "INTENT_RECORDED")
+        self.assertEqual(result["journal"]["intents"]["group:6837899703:Twitter Surfer Public Beta"]["state"], "INTENT_RECORDED")
 
     def test_lost_response_with_observed_group_reuses_exact_resource(self):
         result = self.scenario("lost-create-observed")
         self.assertEqual(result["results"][-1]["state"], "STAGED_PRIVATE")
         self.assertEqual(sum(row["path"] == "betaGroups" and row["method"] == "POST" for row in result["calls"]), 1)
-        self.assertEqual(result["journal"]["intents"]["group:6837899703:Roomwave Public Beta"]["resource_id"], "public-group")
+        self.assertEqual(result["journal"]["intents"]["group:6837899703:Twitter Surfer Public Beta"]["resource_id"], "public-group")
 
     def test_no_upload_or_notification_endpoints(self):
         result = self.scenario("approved")

@@ -10,6 +10,8 @@ struct ArcadeRootView: View {
     @Environment(\.openURL) private var openURL
     @State private var settingsPresented = false
     @State private var creatorPresented = false
+    @State private var socialPresented = false
+    @StateObject private var social = XActivityClient()
     @State private var sharePayload: ArcadeSharePayload?
     @State private var shareError: String?
     private let ink = Color(red: 0.025, green: 0.04, blue: 0.08)
@@ -64,13 +66,21 @@ struct ArcadeRootView: View {
             session.setSystemReducedMotion(systemReducedMotion)
             await session.bootstrap()
         }
-        .onOpenURL { session.handle(url: $0) }
-        .onChange(of: scenePhase) { _, phase in session.setActive(phase == .active && !creatorPresented) }
+        .onOpenURL { if $0.scheme?.lowercased() == "roomwave" { session.handle(url: $0) } }
+        .onChange(of: scenePhase) { _, phase in
+            session.setActive(phase == .active && !creatorPresented && !socialPresented)
+        }
         .onChange(of: systemReducedMotion) { _, value in session.setSystemReducedMotion(value) }
         .onDisappear { session.pause() }
         .sheet(isPresented: $settingsPresented) { settings }
         .sheet(isPresented: $creatorPresented, onDismiss: { session.setActive(scenePhase == .active) }) {
             ArcadeCreatorView { session.useInspiredCourse($0) }
+        }
+        .sheet(isPresented: $socialPresented, onDismiss: { session.setActive(scenePhase == .active) }) {
+            XActivityView(client: social) { current in
+                session.useViralCurrent(current)
+                socialPresented = false
+            }
         }
         .sheet(item: $sharePayload) { ArcadeShareSheet(payload: $0) }
         .alert("Could not share", isPresented: Binding(get: { shareError != nil },
@@ -126,6 +136,15 @@ struct ArcadeRootView: View {
                     .font(.subheadline.weight(.medium)).frame(minHeight: 44)
             }
             .accessibilityIdentifier("arcade.creator")
+            .disabled(session.isLoading)
+            Button {
+                session.setActive(false)
+                socialPresented = true
+            } label: {
+                Label("Personal & community currents", systemImage: "waveform.path")
+                    .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+            }
+            .accessibilityIdentifier("arcade.x-currents")
             .disabled(session.isLoading)
             if !compact {
                 Text("HOLD TO CHARGE  ·  RELEASE TO SOAR")
@@ -317,9 +336,9 @@ struct ArcadeRootView: View {
 
     private func brand(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("ROOMWAVE").font(.system(size: compact ? 23 : 31, weight: .black)).tracking(3)
+            Text("TWITTER SURFER").font(.system(size: compact ? 23 : 31, weight: .black)).tracking(2)
                 .minimumScaleFactor(0.6).lineLimit(1)
-            Text("S L I P S T R E A M").font(.system(size: 10, weight: .medium)).foregroundStyle(teal)
+            Text("YOUR SPACE. THE SOCIAL CURRENT.").font(.system(size: 10, weight: .medium)).foregroundStyle(teal)
         }.accessibilityElement(children: .combine)
     }
 
