@@ -8,6 +8,9 @@ final class ArcadeFlowUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--arcade-evidence"]
+        if ProcessInfo.processInfo.environment["ROOMWAVE_CAPTURE_DIAGNOSTIC"] == "metadata-only" {
+            app.launchArguments.append("--arcade-no-app-snapshot-diagnostic")
+        }
         app.launch()
         let play = app.buttons["arcade.play"]
         XCTAssertTrue(play.waitForExistence(timeout: 60), "The game must reach its ordinary Play action")

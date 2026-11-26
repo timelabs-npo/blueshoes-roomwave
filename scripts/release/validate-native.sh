@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+[[ -z "${TEST_RUNNER_ROOMWAVE_CAPTURE_DIAGNOSTIC:-}" ]] || {
+  echo 'Direct test-runner capture overrides are not accepted.'
+  exit 2
+}
+if [[ -n "${ROOMWAVE_CAPTURE_DIAGNOSTIC:-}" ]]; then
+  [[ "$ROOMWAVE_CAPTURE_DIAGNOSTIC" == metadata-only &&
+     "${GITHUB_EVENT_NAME:-}" == workflow_dispatch &&
+     "${GITHUB_WORKFLOW:-}" == 'Unsigned iOS readiness' &&
+     -z "${ROOMWAVE_DIAGNOSTIC_RUNTIME:-}" ]] || {
+    echo 'Capture isolation is restricted to the explicit SDK-matched unsigned diagnostic workflow.'
+    exit 2
+  }
+fi
+# xcodebuild forwards TEST_RUNNER_ variables to the test runner with the prefix
+# removed. The UI test passes an explicit launch argument to the ordinary app.
+export TEST_RUNNER_ROOMWAVE_CAPTURE_DIAGNOSTIC="${ROOMWAVE_CAPTURE_DIAGNOSTIC:-}"
 if [[ -n "${ROOMWAVE_DIAGNOSTIC_RUNTIME:-}" ]]; then
   # An explicit, isolated comparison cannot change the protected release gate.
   [[ "$ROOMWAVE_DIAGNOSTIC_RUNTIME" == 27.0 &&
@@ -27,7 +43,8 @@ record = {
     'started_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
     'source_sha': os.environ.get('GITHUB_SHA') or subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
     'run_id': os.environ.get('GITHUB_RUN_ID'),
-    'purpose': 'diagnostic-runtime-comparison' if os.environ.get('ROOMWAVE_DIAGNOSTIC_RUNTIME') else 'sdk-matched-native-gate',
+    'purpose': ('diagnostic-app-snapshot-isolation' if os.environ.get('ROOMWAVE_CAPTURE_DIAGNOSTIC') else
+                'diagnostic-runtime-comparison' if os.environ.get('ROOMWAVE_DIAGNOSTIC_RUNTIME') else 'sdk-matched-native-gate'),
     'requested_runtime': os.environ.get('ROOMWAVE_DIAGNOSTIC_RUNTIME') or None,
 }
 (release / 'native-run-start.json').write_text(json.dumps(record, indent=2) + '\n')
@@ -108,6 +125,38 @@ stop_observers
 trap - EXIT
 tail -n 45 build/release/native-test.log
 collect_native_diagnostics
+if [[ "${ROOMWAVE_CAPTURE_DIAGNOSTIC:-}" == metadata-only ]]; then
+  python3 - <<'PY'
+import json, os
+from pathlib import Path
+evidence = Path('build/release/evidence')
+trace = json.loads((evidence / 'diagnostics.json').read_text())
+assert trace['capture_diagnostic'] is True and trace['app_snapshots_enabled'] is False, 'App capture isolation was not observed'
+receipt = {
+    'schema_version': 1,
+    'diagnostic_only': True,
+    'native_input_verified': True,
+    'render_evidence_verified': False,
+    'release_ready': False,
+    'capture_mode': 'diagnostic-no-app-snapshot',
+    'capture_probe_confirmed': True,
+    'source_sha': os.environ.get('GITHUB_SHA'),
+    'run_id': os.environ.get('GITHUB_RUN_ID'),
+    'screenshots': 'Actual XCUITest screenshots; inspect ui-attachments separately',
+}
+(evidence / 'capture-diagnostic.json').write_text(json.dumps(receipt, indent=2) + '\n')
+summary = ('### App snapshot isolation diagnostic\n\n'
+           'The unchanged native touch-flow tests passed with app-internal ARView snapshots disabled. '
+           'Metadata, events, heartbeat and actual XCUITest screenshots were retained. '
+           '**Render evidence was not verified. This diagnostic does not satisfy the release gate; '
+           'no archive or upload was performed.**\n')
+print(summary)
+if os.environ.get('GITHUB_STEP_SUMMARY'):
+    with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+        output.write(summary)
+PY
+  exit 0
+fi
 python3 scripts/ci/verify-arcade-evidence.py build/release/evidence
 ROOMWAVE_SIM_APP=build/release/DerivedData/Build/Products/Debug-iphonesimulator/Roomwave.app
 python3 scripts/release/verify-app.py "$ROOMWAVE_SIM_APP" --build 1 > build/release/simulator-identity.json

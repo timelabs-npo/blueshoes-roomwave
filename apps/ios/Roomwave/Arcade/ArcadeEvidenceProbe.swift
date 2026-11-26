@@ -9,6 +9,7 @@ import RoomwaveArcade
 @MainActor
 enum ArcadeEvidenceProbe {
     static let requested = ProcessInfo.processInfo.arguments.contains("--arcade-evidence")
+    private static let captureDiagnostic = requested && ProcessInfo.processInfo.arguments.contains("--arcade-no-app-snapshot-diagnostic")
     private static var initialized = false
     private static var diagnostics: [String: Any] = [:]
     private static var lastHeartbeatTime: TimeInterval = -.infinity
@@ -62,6 +63,9 @@ enum ArcadeEvidenceProbe {
             else if state.tick >= 60 { mode = "running" }
         }
         lastGrounded = state.grounded
+        // Explicit diagnostic only: retain the ordinary scene, input and metadata
+        // while isolating ARView.snapshot. This emits no render-proof receipt.
+        guard !captureDiagnostic else { return }
         let now = ProcessInfo.processInfo.systemUptime
         guard let mode, !captured.contains(mode), !pending.contains(mode),
               now >= nextCaptureAttempt[mode, default: 0],
@@ -168,6 +172,8 @@ enum ArcadeEvidenceProbe {
             "started_at": timestamp, "updated_at": timestamp,
             "stage": "initializing", "heartbeat_at": NSNull(),
             "screen": "home", "tick": 0, "is_loading": false, "is_active": false,
+            "capture_diagnostic": captureDiagnostic,
+            "app_snapshots_enabled": !captureDiagnostic,
             "stages": [[String: String]]()
         ]
     }

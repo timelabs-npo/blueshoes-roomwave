@@ -10,6 +10,13 @@ on:
           - sdk-matched
           - '27.0'
         default: sdk-matched
+      capture_mode:
+        description: App snapshot isolation only; diagnostic mode cannot establish release readiness
+        type: choice
+        options:
+          - normal
+          - diagnostic-no-app-snapshot
+        default: normal
   pull_request:
     paths:
       - 'Package.swift'
@@ -27,7 +34,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: unsigned-ios-${{ github.ref }}-${{ inputs.runtime_version || 'sdk-matched' }}
+  group: unsigned-ios-${{ github.ref }}-${{ inputs.runtime_version || 'sdk-matched' }}-${{ inputs.capture_mode || 'normal' }}
   cancel-in-progress: true
 
 jobs:
@@ -60,6 +67,7 @@ jobs:
         run: bash scripts/release/validate-native.sh
         env:
           ROOMWAVE_DIAGNOSTIC_RUNTIME: ${{ inputs.runtime_version == '27.0' && '27.0' || '' }}
+          ROOMWAVE_CAPTURE_DIAGNOSTIC: ${{ inputs.capture_mode == 'diagnostic-no-app-snapshot' && 'metadata-only' || '' }}
       - name: Preserve lightweight native review evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
