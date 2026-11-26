@@ -1,0 +1,49 @@
+name: Inspect pinned native evidence
+
+on:
+  pull_request:
+    branches:
+      - diagnostics/avatar-data-41ed-20261126
+    paths:
+      - 'ops/diagnostics/**'
+      - '.github/workflows/inspect-native-evidence.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: inspect-native-evidence-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: arcade-751726d-attempt-2
+            request: ops/diagnostics/native-751726d-attempt-2-request.json
+    name: Inspect ${{ matrix.label }}
+    steps:
+      - name: Check out inspection source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Prepare bounded screenshot reader
+        timeout-minutes: 1
+        run: |
+          python3 -m venv "$RUNNER_TEMP/evidence-env"
+          "$RUNNER_TEMP/evidence-env/bin/python" -m pip install --disable-pip-version-check --no-input --only-binary=:all: Pillow==13.0.0
+          "$RUNNER_TEMP/evidence-env/bin/python" -m py_compile ops/diagnostics/inspect-native-evidence.py
+      - name: Verify original ZIP and print selected evidence
+        timeout-minutes: 3
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVIDENCE_REQUEST: ${{ matrix.request }}
+        run: '"$RUNNER_TEMP/evidence-env/bin/python" ops/diagnostics/inspect-native-evidence.py "$EVIDENCE_REQUEST"'
