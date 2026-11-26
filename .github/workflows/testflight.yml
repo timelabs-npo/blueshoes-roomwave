@@ -3,6 +3,15 @@ name: Roomwave TestFlight pilot
 on:
   workflow_dispatch:
     inputs:
+      runner_class:
+        description: GPU XLarge is billable; use only after organization access and budget are confirmed
+        type: choice
+        options: [standard, gpu]
+        default: standard
+      expected_sha:
+        description: Exact reviewed main commit to validate and release
+        type: string
+        required: true
       export_ipa:
         description: Export a signed pilot after native validation
         type: boolean
@@ -22,18 +31,74 @@ concurrency:
 jobs:
   validate:
     if: github.ref == 'refs/heads/main'
-    runs-on: xcode-27
-    timeout-minutes: 35
+    runs-on: ${{ inputs.runner_class == 'gpu' && 'xcode-27-xlarge' || 'xcode-27' }}
+    # Preserve evidence even when bounded native work approaches its own caps.
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify requested source
+        env:
+          ROOMWAVE_EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: test "$GITHUB_SHA" = "$ROOMWAVE_EXPECTED_SHA"
+      - name: Configure public X OAuth client
+        run: python3 scripts/release/configure-x.py
+        env:
+          X_OAUTH_CLIENT_ID: ${{ vars.X_OAUTH_CLIENT_ID }}
       - name: Select stable Xcode 27.2
         run: bash scripts/release/select-xcode.sh
+      - name: Record actual Metal device capabilities
+        timeout-minutes: 2
+        run: |
+          mkdir -p build
+          xcrun swift scripts/ci/metal-inventory.swift > build/runner-metal.json
+          cat build/runner-metal.json
       - name: Install project generator
         run: command -v xcodegen >/dev/null || brew install xcodegen
-      - name: Validate shared rules and native asset/photo paths
+      - name: Validate arcade rules, real touch flow and native rendering
+        timeout-minutes: 55
         run: bash scripts/release/validate-native.sh
         env:
           DEFER_ARCHIVE_TO_SIGNED_RELEASE: ${{ inputs.export_ipa || inputs.upload }}
+          ROOMWAVE_DIAGNOSTIC_RUNTIME: ''
+      - name: Preserve runner inventory beside native receipts
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if [[ -f build/runner-metal.json ]]; then
+            mkdir -p build/release
+            cp build/runner-metal.json build/release/runner-metal.json
+          fi
+      - name: Preserve lightweight native review evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Roomwave-validation-review-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/release/evidence/*.json
+            build/release/evidence/*.png
+            build/release/evidence/*.txt
+            build/release/evidence/ui-attachments/*.json
+            build/release/evidence/ui-attachments/*.png
+            build/release/evidence/ui-attachments/*.txt
+            build/release/evidence/ui-attachments/*.ips
+            build/release/evidence/ui-attachments/*.crash
+            build/release/evidence/live-diagnostics
+            build/release/evidence/metal-diagnostics
+            build/release/*identity.json
+            build/release/native-run-start.json
+            build/release/simulator-selection.json
+            build/release/native-test.log
+            build/release/runner-metal.json
+            build/release/metal-diagnostics.log
+            build/release/diagnostic-observer.log
+            build/release/container.log
+            build/release/attachments-export.log
+            build/release/evidence-collection.json
+            build/release/recording-observer.log
       - name: Preserve native validation evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -44,24 +109,51 @@ jobs:
           path: |
             build/release/*.log
             build/release/NativeTests.xcresult
+            build/release/evidence
             build/release/unsigned-archive-identity.json
             build/release/UnsignedRoomwave.xcarchive.zip
   release:
     needs: validate
     if: github.ref == 'refs/heads/main' && (inputs.export_ipa || inputs.upload)
-    runs-on: xcode-27
+    runs-on: ${{ inputs.runner_class == 'gpu' && 'xcode-27-xlarge' || 'xcode-27' }}
     timeout-minutes: 45
     environment: testflight
+    env:
+      ROOMWAVE_EXPECTED_SHA: ${{ inputs.expected_sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
+      - name: Configure public X OAuth client
+        run: python3 scripts/release/configure-x.py
+        env:
+          X_OAUTH_CLIENT_ID: ${{ vars.X_OAUTH_CLIENT_ID }}
       - name: Select stable Xcode 27.2
         run: bash scripts/release/select-xcode.sh
+      - name: Record actual Metal device capabilities
+        timeout-minutes: 2
+        run: |
+          mkdir -p build
+          xcrun swift scripts/ci/metal-inventory.swift > build/runner-metal.json
+          cat build/runner-metal.json
       - name: Install project generator
         run: command -v xcodegen >/dev/null || brew install xcodegen
-      - name: Sign, verify, export and optionally upload
+      - name: Allocate this exact release once
+        run: python3 scripts/release/release-allocation.py allocate --upload "$ROOMWAVE_REQUEST_UPLOAD"
+        env:
+          ROOMWAVE_REQUEST_UPLOAD: ${{ inputs.upload }}
+      - name: Preserve immutable release allocation before signing
+        id: release_allocation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Roomwave-allocation-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: error
+          path: build/release/release-allocation.json
+      - name: Sign, verify and export the allocated binary
         run: bash scripts/release/export-ios.sh
         env:
           DEVELOPMENT_TEAM: ${{ vars.DEVELOPMENT_TEAM }}
@@ -75,6 +167,57 @@ jobs:
           APP_STORE_PROFILE_BASE64: ${{ secrets.APP_STORE_PROFILE_BASE64 }}
           ASC_PRIVATE_KEY_P8_BASE64: ${{ secrets.ASC_PRIVATE_KEY_P8_BASE64 }}
           UPLOAD_TO_TESTFLIGHT: ${{ inputs.upload }}
+      - name: Preserve export-only signed binary
+        if: inputs.export_ipa && !inputs.upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Roomwave-signed-export-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            build/release/release-allocation.json
+            build/release/ipa-identity.json
+            build/release/exported-signature.json
+            build/release/Roomwave-dSYMs.zip
+            build/release/release-receipt.json
+            build/release/export/*.ipa
+      - name: Prepare exact binary upload intent
+        if: inputs.upload
+        run: python3 scripts/release/release-allocation.py prepare-upload
+      - name: Preserve signed binary and intent before upload
+        if: inputs.upload
+        id: upload_intent
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Roomwave-upload-intent-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            build/release/release-allocation.json
+            build/release/upload-intent.json
+            build/release/ipa-identity.json
+            build/release/exported-signature.json
+            build/release/Roomwave-dSYMs.zip
+            build/release/release-receipt.json
+            build/release/export/*.ipa
+      - name: Consume preserved intent and observe Apple processing
+        if: inputs.upload
+        run: bash scripts/release/upload-ios.sh
+        env:
+          APP_STORE_APP_ID: ${{ vars.APP_STORE_APP_ID }}
+          ASC_KEY_ID: ${{ vars.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY_P8_BASE64: ${{ secrets.ASC_PRIVATE_KEY_P8_BASE64 }}
+          ROOMWAVE_ALLOCATION_ARTIFACT_ID: ${{ steps.release_allocation.outputs.artifact-id }}
+          ROOMWAVE_UPLOAD_INTENT_ARTIFACT_ID: ${{ steps.upload_intent.outputs.artifact-id }}
+      - name: Preserve runner inventory beside release receipts
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if [[ -f build/runner-metal.json ]]; then
+            mkdir -p build/release
+            cp build/runner-metal.json build/release/runner-metal.json
+          fi
       - name: Preserve release receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -85,3 +228,6 @@ jobs:
           path: |
             build/release/*.json
             build/release/*.log
+            build/release/testflight-operations/*.json
+            build/release/runner-metal.json
+            build/release/Roomwave-dSYMs.zip

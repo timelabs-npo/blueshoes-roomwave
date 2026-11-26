@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "task_id": "app-listing-name-access",
+  "kind": "gate",
+  "base_sha": "54dbb3422794025030a03f535b68c6764fbfaaf7",
+  "state": "BLOCKED_ACCESS",
+  "observed_at": "2026-11-25T20:06:08.328048Z",
+  "reason": "The authorized, guarded en-US appInfoLocalization name-only PATCH from Molecule Foundry to Roomwave Slipstream returned HTTP 403. No successful listing rename is claimed.",
+  "required_evidence": [
+    "Owner grants appropriate authorized access to this exact App Store Connect metadata operation, or performs the name change directly.",
+    "GET readback confirms Roomwave Slipstream for the existing app and en-US localization, with the original app/bundle identity retained. Do not bypass the denial using a different identity or broader mutation."
+  ],
+  "observed_evidence": {
+    "app_id": "6837899703",
+    "bundle_id": "org.timelabs.moleculefoundry",
+    "method": "PATCH",
+    "resource": "appInfoLocalizations/bb088f77-32c4-4864-91be-5d5d5a6038b1",
+    "attribute": "name",
+    "proposed_value": "Roomwave Slipstream",
+    "http_status": 403,
+    "mutation_attempts": 1
+  }
+}

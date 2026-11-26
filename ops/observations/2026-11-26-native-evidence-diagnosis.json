@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "record_type": "native_evidence_diagnosis",
+  "observation_id": "roomwave-native-diagnosis-81a9274-1fa4d86-20261126",
+  "observed_at_utc": "2026-11-26T01:38:30Z",
+  "repository": "timelabs-npo/blueshoes-roomwave",
+  "canonical_state_import": {
+    "status": "PENDING_OPERATOR_REVIEW_AND_IMPORT",
+    "operator_reported_revision": 57,
+    "revision_source": "Root operator report; no fresh canonical-state read by this agent",
+    "canonical_state_write_performed": false,
+    "note": "This report is evidence for integration, not a supervisor-state receipt or an imported state transition."
+  },
+  "inspection": {
+    "run_id": 45735749281,
+    "run_attempt": 1,
+    "conclusion": "success",
+    "source_sha": "f7361c465bcdc2c0248c4eb29529825dde7def88",
+    "tree_sha": "cb660c6cdb8c23ac816ec455e6175be8c8feb062",
+    "url": "https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45735749281",
+    "old_avatar_job_id": 139628438794,
+    "pr7_job_id": 139628438458,
+    "method": "Read-only GitHub Actions inspection; actual original ZIP byte counts and SHA-256 digests verified, then selected existing artifact files read.",
+    "scope": "Inspection success does not change either native run's failure conclusion."
+  },
+  "old_avatar": {
+    "run_id": 45729132932,
+    "run_attempt": 1,
+    "job_id": 139606476827,
+    "conclusion": "failure",
+    "url": "https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45729132932",
+    "source_sha": "81a92749d5b08ad2c525db9e45715051604d7eec",
+    "tree_sha": "3eb06083436a3aabc169dda0a544215f6ebc407e",
+    "checkout_sha": "81a92749d5b08ad2c525db9e45715051604d7eec",
+    "restored_asset_origin_sha": "41ed282b47bc2231f5b444914f1c8389e5635859",
+    "original_artifact": {
+      "id": 15076488863,
+      "name": "roomwave-arcade-evidence",
+      "size_bytes": 485855549,
+      "sha256": "baeeb54cbe43401507a8201aab2cca36c8746492de0462fd1de4a8238b13207d"
+    },
+    "native_tests": {
+      "hosted_passed": 6,
+      "hosted_failed": 0,
+      "ui_passed": 1,
+      "ui_failed": 0,
+      "ui_seconds": 255.444,
+      "xcodebuild_exit": 0
+    },
+    "named_ui_attachments": [
+      {
+        "label": "01-home-neon-dawn",
+        "filename": "1EB0F8DE-C65C-450D-949B-0ADBD19CEC82.png"
+      },
+      {
+        "label": "02-home-low-orbit",
+        "filename": "CA217A52-BC5D-454F-B6FE-34513F6D69D7.png"
+      },
+      {
+        "label": "03-home-black-current",
+        "filename": "08F0C3CC-716F-4509-B1D9-64A711C1F810.png"
+      },
+      {
+        "label": "04-release-and-air",
+        "filename": "EDF9CE4E-E973-4223-B1CF-508DCADCB884.png"
+      },
+      {
+        "label": "05-landing",
+        "filename": "94643928-1F75-48E6-91E5-908B1A4C7B67.png"
+      },
+      {
+        "label": "06-paused",
+        "filename": "0D5FC517-8614-43BD-80F8-AEB008408557.png"
+      },
+      {
+        "label": "07-result",
+        "filename": "0B34205F-5C3E-46CA-9FC0-3C368D9F1E6F.png"
+      },
+      {
+        "label": "08-immediate-retry",
+        "filename": "11A886C6-FAB9-4B09-9AAF-2E8253953314.png"
+      }
+    ],
+    "arview_evidence": {
+      "receipt_count_in_original_artifact": 0,
+      "diagnostics_json_in_original_artifact": false,
+      "events_json_in_original_artifact": false,
+      "produced_receipt_count": "UNKNOWN; not recoverable from the collected artifact",
+      "observer": {
+        "at": "2026-11-26T00:46:10.515473Z",
+        "pid": 29587,
+        "launch_id": "D7A7F48D-B02B-472C-B2CA-043F64E274EB",
+        "stage": "snapshot_accepted",
+        "heartbeat_at": "2026-11-26T00:46:01.485Z"
+      },
+      "limit": "An observed accepted snapshot does not establish production or preservation of all eight required ARView receipts."
+    },
+    "collection_failure": {
+      "entry": "container.log",
+      "label": "native-app-container",
+      "command": "xcrun simctl get_app_container CAD4F983-CE4C-41E7-84A5-DFFD6F0CF3CA org.timelabs.moleculefoundry data",
+      "started_at": "2026-11-26T00:46:49.119Z",
+      "deadline_seconds": 30,
+      "timeout_at": "2026-11-26T00:47:19.286Z",
+      "timeout_elapsed_seconds": 30.166,
+      "ended_at": "2026-11-26T00:47:29.338Z",
+      "total_elapsed_seconds": 40.22,
+      "returncode": 124,
+      "child_returncode": -15,
+      "cleanup_complete": true,
+      "cleanup_warning": "Operation not permitted was logged during cleanup; the wrapper subsequently reported cleanup_complete=true.",
+      "producer_behavior": "The failed lookup enters `|| return 0`; app-cache copying is skipped. The unchanged verifier then fails on missing home-dawn.json.",
+      "classification": "CONFIRMED_POST_TEST_EVIDENCE_COLLECTION_FAILURE"
+    },
+    "graphics": {
+      "render_target_read_warning_present": true,
+      "service_reports_collected": 0,
+      "service_collection_status": "partial",
+      "limits": "Selected simulator diagnostic roots were inaccessible or linked; absence of reports is not proof of absence of service failure."
+    }
+  },
+  "pr7": {
+    "run_id": 45729709518,
+    "run_attempt": 1,
+    "job_id": 139608378051,
+    "conclusion": "failure",
+    "url": "https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45729709518",
+    "source_sha": "1fa4d86072734bacbc3e6a8c66ff310033fdb9b3",
+    "tree_sha": "cf7d08cffb85a242ae5784c3988dc9b8b300224e",
+    "checkout_sha": "6bbfeef6b856a37ef87913e1c08c8882951e6513",
+    "checkout_verification": "PR merge checkout has the pinned source tree and includes the pinned head as a parent.",
+    "original_artifact": {
+      "id": 15076614755,
+      "name": "roomwave-native-review",
+      "size_bytes": 4577229,
+      "sha256": "bde5a6dd8b9c58864cfcada6d0e4b2c51f5950c858b5c0bd36e25bcda362fc2a"
+    },
+    "native_tests": {
+      "hosted_passed": 15,
+      "hosted_failed": 0,
+      "xactivity_client_tests_passed": 9,
+      "ui_passed": 0,
+      "ui_failed": 1,
+      "ui_seconds": 148.258
+    },
+    "ui_failure": {
+      "phase": "FIRST_HOME_PLAY_ENABLED_WAIT",
+      "test": "ArcadeFlowUITests.testRealTouchRunPauseBackgroundResultRetryAndCourses",
+      "assertion": "waitForEnabled",
+      "source_file": "apps/ios/RoomwaveUITests/ArcadeFlowUITests.swift",
+      "source_line": 86,
+      "native_log_line": 1802,
+      "named_ui_attachments": 0
+    },
+    "app_trace": {
+      "pid": 19316,
+      "launch_id": "D0A350B7-9B69-455D-B84F-03BB294898F3",
+      "stage": "snapshot_request",
+      "updated_at": "2026-11-26T00:49:50.318Z",
+      "heartbeat_at": "2026-11-26T00:49:49.988Z",
+      "screen": "home",
+      "tick": 0
+    },
+    "simulator_reports": [
+      {
+        "entry": "evidence/metal-diagnostics/host-user-93cf966b3ea6d8f2-SimMetalHost-2026-11-26-005001.ips",
+        "sha256": "93cf966b3ea6d8f266534ecb8fbba6a2171fb6ce630529065a60ee89b762a2cc",
+        "process": "SimMetalHost",
+        "pid": 4236,
+        "capture_time": "2026-11-26 00:49:50.3207 +0000",
+        "exception": "EXC_CRASH",
+        "signal": "SIGABRT",
+        "termination_namespace": "METAL",
+        "termination_code": 101,
+        "roomwave_association": "Explicit termination reason identifies Roomwave PID19316 and GPU execution error4 / SubmissionsIgnored",
+        "relevant_frame": "MTLSimulator_encountered_GPU_error"
+      },
+      {
+        "entry": "evidence/metal-diagnostics/host-user-e142a1b8e02e9a3c-SimMetalHost-2026-11-26-005119.ips",
+        "sha256": "e142a1b8e02e9a3cff28accd489276f0e4434f46144546cc36da064ca3022d11",
+        "process": "SimMetalHost",
+        "pid": 19605,
+        "capture_time": "2026-11-26 00:51:12.9582 +0000",
+        "exception": "EXC_BAD_ACCESS",
+        "signal": "SIGSEGV",
+        "termination_namespace": "SIGNAL",
+        "termination_code": 11,
+        "roomwave_association": "Shared-host time-window observation only; no explicit Roomwave process association established",
+        "relevant_frame": "MTLSimApplicationContext::newCommandQueueWithDescriptor(NSObject<OS_xpc_object>*)"
+      },
+      {
+        "entry": "evidence/metal-diagnostics/host-user-e448a72555254b16-SimMetalHost-2026-11-26-005006.ips",
+        "sha256": "e448a72555254b1696c88e2cac42017f57dd0b85b2eed70c57fdb15df8095b99",
+        "process": "SimMetalHost",
+        "pid": 19569,
+        "capture_time": "2026-11-26 00:49:51.8147 +0000",
+        "exception": "EXC_BAD_ACCESS",
+        "signal": "SIGSEGV",
+        "termination_namespace": "SIGNAL",
+        "termination_code": 11,
+        "roomwave_association": "Shared-host time-window observation only; no explicit Roomwave process association established",
+        "relevant_frame": "MTLSimApplicationContext::newObjectCommand_DEPRECATED(NSObject<OS_xpc_object>*)"
+      }
+    ],
+    "limit": "Passing hosted OAuth/client tests establish fixture-level behavior, not live X authorization, network integration, or a passing UI/native release gate."
+  },
+  "shared_runtime": {
+    "sdk": "27.2",
+    "runtime": "27.2",
+    "runtime_build": "24B8117",
+    "simulator_udid": "CAD4F983-CE4C-41E7-84A5-DFFD6F0CF3CA",
+    "diagnostic_runtime_override": false,
+    "note": "Matching simulator identifiers across separately assigned runners do not prove a shared physical host."
+  },
+  "wd": {
+    "observed_at_utc": "2026-11-26T01:24:56Z",
+    "observed_at_moscow": "2026-11-26T04:24:56+03:00",
+    "operation": "Single authorized read_file probe of an existing task evidence receipt",
+    "outcome": "OFFLINE",
+    "message": "No Desktop Commander device is currently online",
+    "device_last_seen_minutes_approx": 40,
+    "pending_call_id": null,
+    "retry_performed": false
+  },
+  "next_actions": [
+    "Review and integrate this observation, then import into the canonical operator state when accessible; do not claim revision57 was updated.",
+    "Preserve validated same-launch app capture files before late simulator RPCs; make lookup/copy results explicit and include collection logs in lightweight artifacts.",
+    "Keep the eight-capture verifier and real-touch UI assertions unchanged; do not combine captures from different launches.",
+    "Validate the preservation correction before authorizing any further native execution or release."
+  ],
+  "release_claims": {
+    "native_gate_passed": false,
+    "unsigned_archive_verified_for_these_runs": false,
+    "public_beta_ready": false,
+    "testflight_upload_performed_by_this_observation": false,
+    "apple_account_mutation_performed": false
+  }
+}

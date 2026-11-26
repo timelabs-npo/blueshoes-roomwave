@@ -29,6 +29,9 @@ final class RoomwaveModel: ObservableObject {
     @Published var avatarMuscle = false
     @Published var avatarSkin = true
     @Published var avatarCoat = true
+    // The arcade creator consumes a fresh sample immediately. No capture is
+    // retained in the public game model or exported through a challenge link.
+    var onCaptureSample: ((ScanSample) -> Void)?
 
     private let session = ARSession()
     private var captureTask: Task<Void, Never>?
@@ -219,6 +222,11 @@ final class RoomwaveModel: ObservableObject {
 
     private func freeze(_ sample: ScanSample) {
         session.pause()
+        if let onCaptureSample {
+            phase = .idle
+            onCaptureSample(sample)
+            return
+        }
         do {
             let normalized = try ScanNormalizer.normalize(sample)
             let generated = try TrackGenerator.makeTrack(from: normalized, seed: 27)

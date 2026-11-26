@@ -19,3 +19,5 @@ logs/
 *.jsonl
 .derivedData/
 apps/ios/Roomwave.xcodeproj/
+__pycache__/
+*.pyc

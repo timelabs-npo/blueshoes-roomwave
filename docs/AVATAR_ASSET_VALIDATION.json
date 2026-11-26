@@ -12,15 +12,91 @@
   "joints_per_layer": 66,
   "skeletons": 4,
   "hierarchy": "Xform root with four independently skinned named SkelRoot layers",
-  "skinned_meshes": 36,
-  "triangles": 22912,
+  "skinned_meshes": 42,
+  "triangles": 26892,
   "animation": {
     "name": "RoomwaveGlide",
     "duration_seconds": 2,
     "samples": 61,
     "fps": 30
   },
-  "sha256": "9c1c0a0af0952fa30f91918048bfcd5553d52556ba83c720598aeba5b9cd5c8d",
-  "bytes": 607617,
-  "validation": "USD stage opened, topology validated, all meshes have skinned joint influences; Apple device playback not yet tested."
+  "animated_validation": {
+    "evaluated_samples_per_layer": 61,
+    "loop_endpoint_max_error_metres": 0.0,
+    "finite_coordinates": true,
+    "normalized_weights": true,
+    "layer_bounds_metres": {
+      "Skin": {
+        "min": [
+          -0.302683562040329,
+          3.394631858100183e-05,
+          -0.14809811115264893
+        ],
+        "max": [
+          0.29400399327278137,
+          0.9121701121330261,
+          0.08710852265357971
+        ],
+        "minimum_y_range": [
+          3.394631858100183e-05,
+          3.394631858100183e-05
+        ],
+        "maximum_motion_from_first_sample": 0.024036221206188202
+      },
+      "Coat": {
+        "min": [
+          -0.30690181255340576,
+          -0.0048180921003222466,
+          -0.15247228741645813
+        ],
+        "max": [
+          0.29822850227355957,
+          0.9198318123817444,
+          0.16502444446086884
+        ],
+        "minimum_y_range": [
+          -0.0048180921003222466,
+          -0.0048180921003222466
+        ],
+        "maximum_motion_from_first_sample": 0.024369681254029274
+      },
+      "SkeletonOverlay": {
+        "min": [
+          -0.2462407350540161,
+          0.06475570052862167,
+          -0.09599599242210388
+        ],
+        "max": [
+          0.24127322435379028,
+          0.8396857380867004,
+          0.04241381958127022
+        ],
+        "minimum_y_range": [
+          0.06475570052862167,
+          0.06475570052862167
+        ],
+        "maximum_motion_from_first_sample": 0.01588910073041916
+      },
+      "MuscleOverlay": {
+        "min": [
+          -0.2504468262195587,
+          0.06475570052862167,
+          -0.09868363291025162
+        ],
+        "max": [
+          0.2452688366174698,
+          0.8396857380867004,
+          0.04241381958127022
+        ],
+        "minimum_y_range": [
+          0.06475570052862167,
+          0.06475570052862167
+        ],
+        "maximum_motion_from_first_sample": 0.01588910073041916
+      }
+    }
+  },
+  "sha256": "1eff38b20f3c443e04f5dc80f526067e35a4441ac4bae7aca6abe04a5ecb6d3f",
+  "bytes": 682785,
+  "validation": "USD stage reopened; topology and normalized skinning validated; all 61 animated samples finite; soles planted and loop endpoints matched. New asset requires native import/playback revalidation; physical iPhone playback not tested."
 }

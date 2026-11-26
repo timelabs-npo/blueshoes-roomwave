@@ -4,7 +4,7 @@ Visible skeleton and muscle layers below are stylized animation helpers authored
 for this project, not medical anatomy or a physiological simulation.
 """
 import bpy, math, json, pathlib
-from mathutils import Vector, Matrix
+from mathutils import Vector, Matrix, Quaternion
 
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 OUT=ROOT/'build/character'; OUT.mkdir(parents=True,exist_ok=True)
@@ -25,16 +25,21 @@ for obj in list(bpy.context.scene.objects):
         bpy.data.objects.remove(obj,do_unlink=True)
 
 COLORS={
-    'Skin':(0.085,0.24,0.33,1), 'Eye':(0.12,0.9,1,1),
-    'Coat':(0.015,0.024,0.085,1),'Cyan':(0.03,0.74,1,1),
+    'Skin':(0.055,0.17,0.21,1), 'Eye':(0.12,0.9,1,1),
+    'Coat':(0.018,0.035,0.085,1),'Cyan':(0.03,0.74,1,1),
     'Bone':(0.88,0.91,0.75,1),'Muscle':(0.8,0.13,0.3,1),
-    'Purple':(0.5,0.03,0.9,1)
+    'Purple':(0.11,0.13,0.27,1),'Teal':(0.035,0.25,0.29,1),
+    'Warm':(0.95,0.47,0.20,1)
 }
+SURFACES={name:{'roughness':.64,'metallic':.025} for name in COLORS}
+for name in ['Cyan','Eye','Warm']:
+    SURFACES[name]={'roughness':.42,'metallic':.06}
 mats={}
 for name,rgba in COLORS.items():
     m=bpy.data.materials.new('RW_'+name);m.diffuse_color=rgba;m.use_nodes=True
     p=m.node_tree.nodes.get('Principled BSDF');p.inputs['Base Color'].default_value=rgba
-    p.inputs['Roughness'].default_value=.34;p.inputs['Metallic'].default_value=.25
+    p.inputs['Roughness'].default_value=SURFACES[name]['roughness']
+    p.inputs['Metallic'].default_value=SURFACES[name]['metallic']
     if name in {'Cyan','Eye'}:
         p.inputs['Emission Color'].default_value=rgba;p.inputs['Emission Strength'].default_value=.7
     mats[name]=m
@@ -65,7 +70,11 @@ def shell(name,predicate,key,offset):
     return obj
 
 shell('Coat_Jacket',lambda p:.91<p.z<1.49 and abs(p.x)<.29,'Coat',.011)
-shell('Coat_BlueBoots',lambda p:p.z<.19,'Cyan',.009)
+shell('Coat_Trousers',lambda p:.19<p.z<1.02,'Coat',.009)
+shell('Coat_KneePanels',lambda p:.48<p.z<.66 and p.y<.025,'Teal',.013)
+shell('Coat_Hood',lambda p:p.z>1.54 and (p.y>-.065 or p.z>1.72),'Coat',.014)
+shell('Coat_BlueBoots',lambda p:p.z<.19,'Teal',.009)
+shell('Coat_BootCuffs',lambda p:.17<p.z<.22,'Cyan',.011)
 shell('Coat_Gauntlets',lambda p:abs(p.x)>.51 and p.z<1.5,'Coat',.008)
 
 bpy.context.view_layer.objects.active=arm;arm.select_set(True)
@@ -75,19 +84,41 @@ tail.parent=arm.data.edit_bones['spine_03'];tail.use_deform=True
 bpy.ops.object.mode_set(mode='OBJECT')
 
 verts=[];faces=[]
-for row in range(6):
-    t=row/5
-    for col in range(5):
-        u=col/4-.5
-        verts.append((u*(.42+.15*t),.14+.19*t,1.4-.56*t))
-for row in range(5):
-    for col in range(4):
-        a=row*5+col;faces.append((a,a+1,a+6,a+5))
+# Two tailored panels with an open centre seam, folded shoulders and swept hems.
+# The geometry carries its shape at rest; one authored tail joint supplies motion.
+for side in [-1,1]:
+    start=len(verts)
+    for row in range(6):
+        t=row/5
+        for col in range(4):
+            u=col/3
+            x=side*(.018+.022*t+u*(.19-.045*t))
+            y=.15+.16*t+.035*math.sin(u*math.pi)-.025*t*t
+            z=1.405-.46*t+.065*t*u
+            verts.append((x,y,z))
+    for row in range(5):
+        for col in range(3):
+            a=start+row*4+col;faces.append((a,a+1,a+5,a+4))
 mesh=bpy.data.meshes.new('CoatTailMesh');mesh.from_pydata(verts,[],faces);mesh.update()
-cape=bpy.data.objects.new('Coat_Tail',mesh);bpy.context.collection.objects.link(cape);cape['layer']='Coat';material(cape,'Purple');skinning(cape)
+cape=bpy.data.objects.new('Coat_Tail',mesh);bpy.context.collection.objects.link(cape);cape['layer']='Coat';material(cape,'Coat');skinning(cape)
 vg0=cape.vertex_groups.new(name='spine_03');vg1=cape.vertex_groups.new(name='roomwave_coat_tail')
 for i in range(len(verts)):
-    t=(i//5)/5;vg0.add([i],1-t,'REPLACE');vg1.add([i],t,'REPLACE')
+    t=((i%24)//4)/5;vg0.add([i],1-t,'REPLACE');vg1.add([i],t,'REPLACE')
+# Narrow cyan piping makes the silhouette readable from the follow camera without
+# turning the whole coat into a luminous rectangle.
+for side_index in range(2):
+    points=[];panels=[]
+    for row in range(6):
+        p=Vector(verts[side_index*24+row*4+3]);p.y+=.004
+        points.extend([tuple(p),tuple(p+Vector((-.012 if side_index else .012,.002,0)))])
+    for row in range(5):
+        a=row*2;panels.append((a,a+1,a+3,a+2))
+    edge_mesh=bpy.data.meshes.new('CoatPipingMesh');edge_mesh.from_pydata(points,[],panels);edge_mesh.update()
+    edge=bpy.data.objects.new('Coat_Piping_'+str(side_index),edge_mesh);bpy.context.collection.objects.link(edge)
+    edge['layer']='Coat';material(edge,'Cyan');skinning(edge)
+    g0=edge.vertex_groups.new(name='spine_03');g1=edge.vertex_groups.new(name='roomwave_coat_tail')
+    for i in range(len(points)):
+        t=(i//2)/5;g0.add([i],1-t,'REPLACE');g1.add([i],t,'REPLACE')
 
 major=['pelvis','spine_01','spine_02','spine_03','neck_01','Head',
        'upperarm_l','lowerarm_l','upperarm_r','lowerarm_r',
@@ -105,18 +136,40 @@ for name in major:
 bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1,radius=1,location=(0,-.153,1.35))
 emblem=bpy.context.object;emblem.name='Coat_CyanDiamond';emblem.scale=(.038,.012,.06)
 bpy.ops.object.transform_apply(location=True,rotation=True,scale=True)
-emblem['layer']='Coat';material(emblem,'Cyan');skinning(emblem,'spine_03')
+emblem['layer']='Coat';material(emblem,'Warm');skinning(emblem,'spine_03')
 
 scene=bpy.context.scene;scene.render.fps=30;scene.frame_start=1;scene.frame_end=61
+rest_bottom=min(v.co.z for v in body.data.vertices)
+
+def turn_joint(name,axis,angle):
+    """Author a local joint rotation about an axis in the rest armature space."""
+    p=arm.pose.bones[name]
+    rest=p.bone.matrix_local.to_quaternion()
+    p.rotation_mode='QUATERNION'
+    p.rotation_quaternion=rest.inverted()@Quaternion(Vector(axis),angle)@rest
+
 for frame in range(1,62):
+    scene.frame_set(frame)
     phase=2*math.pi*(frame-1)/60
     for p in arm.pose.bones:p.matrix_basis=Matrix.Identity(4)
+    # Static symmetric leg flex keeps both soles planted. The torso and arms carry
+    # the gentle two-second balance cycle; there is no floating root bob.
     for side,sign in [('l',1),('r',-1)]:
-        p=arm.pose.bones['upperarm_'+side];h=p.bone.head_local
-        angle=sign*(.42+.07*math.sin(phase))
-        p.matrix=Matrix.Translation(h)@Matrix.Rotation(angle,4,'Y')@Matrix.Translation(-h)@p.bone.matrix_local
-    root=arm.pose.bones['root'];root.location.z=.026*(1-math.cos(phase))
-    ct=arm.pose.bones['roomwave_coat_tail'];ct.rotation_mode='XYZ';ct.rotation_euler.x=.15*math.sin(phase+.7)
+        turn_joint('thigh_'+side,(1,0,0),-.55)
+        turn_joint('calf_'+side,(1,0,0),1.10)
+        turn_joint('foot_'+side,(1,0,0),-.55)
+        turn_joint('upperarm_'+side,(0,1,0),sign*(1.03+.035*math.sin(phase+sign*.3)))
+        turn_joint('lowerarm_'+side,(0,0,1),-sign*(.72+.045*math.sin(phase)))
+    turn_joint('spine_01',(1,0,0),.12)
+    turn_joint('spine_03',(0,1,0),.022*math.sin(phase))
+    turn_joint('Head',(1,0,0),-.08)
+    turn_joint('roomwave_coat_tail',(1,0,0),-.12+.055*math.sin(phase+.7))
+    bpy.context.view_layer.update()
+    evaluated=body.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    evaluated_mesh=evaluated.to_mesh()
+    posed_bottom=min((evaluated.matrix_world@v.co).z for v in evaluated_mesh.vertices)
+    evaluated.to_mesh_clear()
+    arm.pose.bones['root'].location.z=rest_bottom-posed_bottom
     for p in arm.pose.bones:
         p.rotation_mode='QUATERNION'
         p.keyframe_insert(data_path='location',frame=frame)
@@ -131,7 +184,8 @@ bottom=min(v.co.z for v in body.data.vertices);scale=1/height
 M=Matrix(((-scale,0,0,0),(0,0,scale,-bottom*scale),(0,scale,0,0),(0,0,0,1)))
 def matrix_list(mat):return [list(row) for row in mat]
 bones=list(arm.data.bones);bone_index={b.name:i for i,b in enumerate(bones)}
-data={'coordinate_system':{'up':'Y','forward':'-Z','height_metres':1},'materials':COLORS,'bones':[], 'meshes':[],'animation':[]}
+data={'coordinate_system':{'up':'Y','forward':'-Z','height_metres':1},'materials':COLORS,
+      'surfaces':SURFACES,'bones':[], 'meshes':[],'animation':[]}
 for b in bones:
     data['bones'].append({'name':b.name,'parent':b.parent.name if b.parent else None,'bind':matrix_list(M@arm.matrix_world@b.matrix_local)})
 for obj in scene.objects:
@@ -180,3 +234,13 @@ scene.render.resolution_x=1024;scene.render.resolution_y=1024;scene.render.resol
 scene.render.image_settings.file_format='PNG';scene.render.image_settings.color_mode='RGB';scene.render.film_transparent=False
 scene.render.filepath=str(OUT/'AppIcon-1024.png');bpy.ops.render.render(write_still=True)
 print('APP_ICON_RENDERED',flush=True)
+# Actual asset proofs, not gameplay screenshots. Rear view matches the game's
+# usual viewing direction; front view exposes arm/leg articulation for review.
+scene.render.resolution_x=768;scene.render.resolution_y=768
+scene.cycles.samples=128
+camdata.ortho_scale=2.45
+for label,location in [('Rear',(2.5,4.5,2.2)),('Front',(2.5,-4.5,2.2))]:
+    cam.location=location;cam.rotation_euler=(Vector((0,0,.83))-cam.location).to_track_quat('-Z','Y').to_euler()
+    scene.render.filepath=str(OUT/('Avatar-Surf-Stance-'+label+'.png'))
+    bpy.ops.render.render(write_still=True)
+    print('ASSET_PROOF_RENDERED',label,flush=True)

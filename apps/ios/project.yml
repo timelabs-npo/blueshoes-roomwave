@@ -10,7 +10,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     TARGETED_DEVICE_FAMILY: "1,2"
-    MARKETING_VERSION: "0.2.0"
+    MARKETING_VERSION: "0.3.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   Roomwave:
@@ -32,6 +32,10 @@ targets:
     dependencies:
       - package: RoomwaveCore
         product: RoomwaveCore
+      - package: RoomwaveCore
+        product: RoomwaveArcade
+      - package: RoomwaveCore
+        product: RoomwaveCreator
   RoomwaveNativeTests:
     type: bundle.unit-test
     platform: iOS
@@ -48,12 +52,30 @@ targets:
       - target: Roomwave
       - package: RoomwaveCore
         product: RoomwaveCore
+      - package: RoomwaveCore
+        product: RoomwaveArcade
+      - package: RoomwaveCore
+        product: RoomwaveCreator
+  RoomwaveUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "27.0"
+    sources:
+      - path: RoomwaveUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.timelabs.moleculefoundry.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Roomwave
+    dependencies:
+      - target: Roomwave
 schemes:
   Roomwave:
     build:
       targets:
         Roomwave: all
         RoomwaveNativeTests: [test]
+        RoomwaveUITests: [test]
     run:
       config: Debug
     test:
@@ -61,4 +83,6 @@ schemes:
       gatherCoverageData: false
       targets:
         - name: RoomwaveNativeTests
+          parallelizable: false
+        - name: RoomwaveUITests
           parallelizable: false

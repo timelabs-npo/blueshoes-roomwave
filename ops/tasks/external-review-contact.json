@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "task_id": "external-review-contact",
+  "kind": "gate",
+  "base_sha": "0f52279e465ae8ec9ebb806254f211722444236f",
+  "state": "BLOCKED_INPUT",
+  "observed_at": "2026-11-25T17:47:25.948997Z",
+  "reason": "Apple betaAppReviewDetail for app 6837899703 has empty contactFirstName, contactLastName, contactPhone and contactEmail. The draft production review detail has no reusable contact either.",
+  "required_evidence": [
+    "Owner supplies a real review contact: first name, last name, email and international-format phone.",
+    "Protected release coordinator writes the contact privately and verifies the Apple response. Do not commit personal contact values to this public repository."
+  ],
+  "observed_evidence": {
+    "app_id": "6837899703",
+    "bundle_id": "org.timelabs.moleculefoundry",
+    "method": "GET",
+    "resource": "apps/6837899703/betaAppReviewDetail",
+    "contact_fields_present": false,
+    "external_group_observed": false,
+    "public_testflight_url_observed": false
+  }
+}

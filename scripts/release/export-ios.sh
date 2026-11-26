@@ -3,15 +3,16 @@
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/../.."
+ROOMWAVE_RELEASE_VERSION="$(cat VERSION)"
+[[ "$ROOMWAVE_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid marketing version.'; exit 2; }
+export ROOMWAVE_RELEASE_VERSION
 [[ "${GITHUB_REF:-}" == refs/heads/main ]] || { echo 'Release requires main.'; exit 2; }
 for name in DEVELOPMENT_TEAM PRODUCT_BUNDLE_IDENTIFIER PROVISIONING_PROFILE_NAME APPLE_DISTRIBUTION_P12_BASE64 APPLE_DISTRIBUTION_P12_PASSWORD APP_STORE_PROFILE_BASE64; do
   [[ -n "${!name:-}" ]] || { echo "Missing protected release value: $name"; exit 2; }
 done
 [[ "$PRODUCT_BUNDLE_IDENTIFIER" == org.timelabs.moleculefoundry ]] || { echo 'Unexpected app identity.'; exit 2; }
 [[ "$DEVELOPMENT_TEAM" == 398XACWZ7G ]] || { echo 'Unexpected Apple team.'; exit 2; }
-[[ "${GITHUB_RUN_NUMBER:-}" =~ ^[1-9][0-9]*$ && "${GITHUB_RUN_ATTEMPT:-}" =~ ^[1-9][0-9]*$ ]] || { echo 'Invalid workflow build number.'; exit 2; }
-(( GITHUB_RUN_NUMBER <= 8999 && GITHUB_RUN_ATTEMPT <= 99 )) || { echo 'Workflow build number exceeds Apple version component limits.'; exit 2; }
-BUILD_NUMBER="$((1000 + GITHUB_RUN_NUMBER)).${GITHUB_RUN_ATTEMPT}"
+BUILD_NUMBER="$(python3 scripts/release/release-allocation.py build)"
 export ROOMWAVE_RELEASE_BUILD="$BUILD_NUMBER"
 mkdir -p build/release/export
 if [[ "${UPLOAD_TO_TESTFLIGHT:-false}" == true ]]; then
@@ -76,8 +77,8 @@ xcodegen generate --spec apps/ios/project.yml --project apps/ios
 if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave -configuration Release \
   -destination 'generic/platform=iOS' -archivePath build/release/Roomwave.xcarchive \
   DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$IDENTITY" \
-  PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-  MARKETING_VERSION=0.2.0 archive > build/release/archive.log 2>&1; then
+  PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" DEBUG_INFORMATION_FORMAT=dwarf-with-dsym \
+  MARKETING_VERSION="$ROOMWAVE_RELEASE_VERSION" archive > build/release/archive.log 2>&1; then
   tail -n 100 build/release/archive.log; exit 1
 fi
 APP=build/release/Roomwave.xcarchive/Products/Applications/Roomwave.app
@@ -98,32 +99,14 @@ fi
 IPA=$(find build/release/export -maxdepth 1 -name '*.ipa' -print -quit)
 [[ -n "$IPA" ]] || { echo 'Signed IPA not produced.'; exit 2; }
 python3 scripts/release/verify-app.py "$IPA" --build "$BUILD_NUMBER" > build/release/ipa-identity.json
-export ROOMWAVE_RELEASE_IPA="$IPA"
-export ROOMWAVE_UPLOAD_ACCEPTED=false
-if [[ "${UPLOAD_TO_TESTFLIGHT:-false}" == true ]]; then
-  mkdir -p "$ROOMWAVE_SIGNING_WORK/private_keys"
-  python3 - <<'PY'
-import os,base64
-from pathlib import Path
-root=Path(os.environ['ROOMWAVE_SIGNING_WORK'])/'private_keys'
-(root/('AuthKey_'+os.environ['ASC_KEY_ID']+'.p8')).write_bytes(base64.b64decode(os.environ['ASC_PRIVATE_KEY_P8_BASE64'],validate=True))
-PY
-  if ! API_PRIVATE_KEYS_DIR="$ROOMWAVE_SIGNING_WORK/private_keys" xcrun altool --upload-app --type ios \
-    -f "$IPA" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" > build/release/upload.log 2>&1; then
-    tail -n 70 build/release/upload.log; exit 1
-  fi
-  export ROOMWAVE_UPLOAD_ACCEPTED=true
-fi
-python3 - <<'PY'
-import datetime,hashlib,json,os
-from pathlib import Path
-ipa=Path(os.environ['ROOMWAVE_RELEASE_IPA'])
-receipt={'commit':os.environ['GITHUB_SHA'],'app_store_app_id':'6837899703','bundle_identifier':'org.timelabs.moleculefoundry','version':'0.2.0',
-         'build':os.environ['ROOMWAVE_RELEASE_BUILD'],'signature_verified':True,'ipa_sha256':hashlib.sha256(ipa.read_bytes()).hexdigest(),
-         'upload_accepted':os.environ['ROOMWAVE_UPLOAD_ACCEPTED']=='true','tester_access_verified':False,
-         'observed_utc':datetime.datetime.now(datetime.timezone.utc).isoformat()}
-Path('build/release/release-receipt.json').write_text(json.dumps(receipt,indent=2)+'\n');print(json.dumps(receipt))
-PY
-if [[ "$ROOMWAVE_UPLOAD_ACCEPTED" == true ]]; then
-  node scripts/release/apple-status.mjs processing
-fi
+# Retain the actual archive's symbols before preserving any upload intent.
+DSYM_ROOT=build/release/Roomwave.xcarchive/dSYMs
+[[ -s "$DSYM_ROOT/Roomwave.app.dSYM/Contents/Resources/DWARF/Roomwave" ]] || {
+  echo 'The signed archive has no application debug symbols.'; exit 2
+}
+ditto -c -k --keepParent "$DSYM_ROOT" build/release/Roomwave-dSYMs.zip
+python3 scripts/release/verify-exported-signature.py "$IPA" --build "$BUILD_NUMBER" \
+  --dsym-archive build/release/Roomwave-dSYMs.zip --output build/release/exported-signature.json
+# Upload occurs in a separate step only after its immutable intent and signed
+# binary have been preserved as a GitHub artifact. This stage never uploads.
+python3 scripts/release/release-allocation.py record-export

@@ -2,134 +2,129 @@ name: Unsigned iOS readiness
 
 on:
   workflow_dispatch:
+    inputs:
+      runner_class:
+        description: GPU XLarge is billable and requires organization access; standard remains the default
+        type: choice
+        options: [standard, gpu]
+        default: standard
+      runtime_version:
+        description: Simulator runtime (27.0 is a diagnostic comparison, not the release gate)
+        type: choice
+        options:
+          - sdk-matched
+          - '27.0'
+        default: sdk-matched
   pull_request:
+    paths:
+      - 'Package.swift'
+      - 'Package.resolved'
+      - 'Sources/**'
+      - 'Tests/**'
+      - 'apps/ios/**'
+      - 'Assets/**'
+      - 'VERSION'
+      - 'scripts/ci/**'
+      - 'scripts/release/**'
+      - '.github/workflows/unsigned-ios.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: unsigned-ios-${{ github.ref }}
+  group: unsigned-ios-${{ github.ref }}-${{ inputs.runtime_version || 'sdk-matched' }}-${{ inputs.runner_class || 'standard' }}
   cancel-in-progress: true
 
 jobs:
   readiness:
-    runs-on: xcode-27
-    timeout-minutes: 35
+    # Forked public PR code must not execute on this trusted native runner.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association))
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.runner_class == 'gpu' && 'xcode-27-xlarge' || 'xcode-27' }}
+    # Individual native/boot/archive limits total up to 49 minutes. Leave room
+    # for bounded diagnostics and the artifact steps when one limit is reached.
+    timeout-minutes: 65
     steps:
-      - name: Check out source
+      - name: Check out reviewed source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Select stable Xcode 27.2
-        shell: bash
-        run: |
-          set -euo pipefail
-          selected=""
-          for app in /Applications/Xcode_27.2.app /Applications/Xcode_27.2.0.app; do
-            if [ -d "$app/Contents/Developer" ]; then
-              version="$(DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version)"
-              if [ "$(printf '%s\n' "$version" | head -n 1)" = "Xcode 27.2" ]; then
-                selected="$app/Contents/Developer"
-                break
-              fi
-            fi
-          done
-          if [ -z "$selected" ]; then
-            echo "::error::Stable Xcode 27.2 was not found."
-            exit 1
-          fi
-          echo "DEVELOPER_DIR=$selected" >> "$GITHUB_ENV"
-          DEVELOPER_DIR="$selected" xcodebuild -version
-          DEVELOPER_DIR="$selected" xcodebuild -showsdks
-          DEVELOPER_DIR="$selected" swift --version
-      - name: Test shared core
-        run: swift test --parallel
-      - name: Install XcodeGen if needed
-        timeout-minutes: 6
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v xcodegen >/dev/null 2>&1; then
-            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
-          fi
-          xcodegen --version
-      - name: Generate native project
-        working-directory: apps/ios
-        run: xcodegen generate --spec project.yml
-      - name: Choose and boot an iOS 27 simulator
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -euo pipefail
-          simulator_id="$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin); rows=[x for k,v in d["devices"].items() if "iOS-27" in k for x in v if x.get("isAvailable",False) and x["name"].startswith("iPhone")]; rows.sort(key=lambda x:(x["name"]!="iPhone 18 Pro Max",x["name"])); assert rows,"No available iOS 27 iPhone simulator"; print(rows[0]["udid"])')"
-          echo "ROOMWAVE_SIMULATOR_ID=$simulator_id" >> "$GITHUB_ENV"
-          xcrun simctl boot "$simulator_id" || true
-          xcrun simctl bootstatus "$simulator_id" -b
-      - name: Build and test native pilot without signing
-        working-directory: apps/ios
-        run: >-
-          xcodebuild -project Roomwave.xcodeproj -scheme Roomwave
-          -configuration Debug -sdk iphonesimulator
-          -destination "platform=iOS Simulator,id=$ROOMWAVE_SIMULATOR_ID"
-          -derivedDataPath ../../.derivedData
-          -resultBundlePath ../../build/native-test-results/RoomwaveNative.xcresult
-          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
-      - name: Capture the running simulator pilot
-        timeout-minutes: 3
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p build/pilot-artifacts
-          simulator_app=".derivedData/Build/Products/Debug-iphonesimulator/Roomwave.app"
-          python3 scripts/release/verify-app.py "$simulator_app" --build 1 > build/pilot-artifacts/simulator-identity.json
-          xcrun simctl install "$ROOMWAVE_SIMULATOR_ID" "$simulator_app"
-          app_data="$(xcrun simctl get_app_container "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry data)"
-          capture_dir="$app_data/Library/Caches/RoomwavePilotCaptures"
-          xcrun simctl terminate "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry >/dev/null 2>&1 || true
-          rm -f "$capture_dir/preview.json" "$capture_dir/race.json"
-          launch_output="$(xcrun simctl launch "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry --pilot-demo)"
-          printf '%s\n' "$launch_output"
-          launch_pid="${launch_output##*: }"
-          python3 scripts/ci/wait-native-preview.py "$capture_dir/preview.json" preview --pid "$launch_pid" --output build/pilot-artifacts/demo-capture.json --image-output build/pilot-artifacts/Roomwave-demo-scene.png
-          xcrun simctl terminate "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry
-          rm -f "$capture_dir/preview.json" "$capture_dir/race.json"
-          launch_output="$(xcrun simctl launch "$ROOMWAVE_SIMULATOR_ID" org.timelabs.moleculefoundry --pilot-race)"
-          printf '%s\n' "$launch_output"
-          launch_pid="${launch_output##*: }"
-          python3 scripts/ci/wait-native-preview.py "$capture_dir/race.json" race --pid "$launch_pid" --output build/pilot-artifacts/race-capture.json --image-output build/pilot-artifacts/Roomwave-race-scene.png
-          # This later full UI capture may truthfully show the normal race result.
-          xcrun simctl io "$ROOMWAVE_SIMULATOR_ID" screenshot build/pilot-artifacts/Roomwave-app-screen.png
-          ditto -c -k --keepParent "$simulator_app" build/pilot-artifacts/Roomwave-simulator.app.zip
-          git rev-parse HEAD > build/pilot-artifacts/source-sha.txt
-          xcrun simctl list devices "$ROOMWAVE_SIMULATOR_ID" > build/pilot-artifacts/simulator.txt
-      - name: Archive the unsigned device Release pilot
-        timeout-minutes: 12
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p build/pilot-artifacts
-          if ! xcodebuild -project apps/ios/Roomwave.xcodeproj -scheme Roomwave \
-            -configuration Release -destination 'generic/platform=iOS' \
-            -archivePath build/UnsignedRoomwave.xcarchive \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            CURRENT_PROJECT_VERSION=1 MARKETING_VERSION=0.2.0 archive \
-            > build/pilot-artifacts/unsigned-archive.log 2>&1; then
-            tail -n 120 build/pilot-artifacts/unsigned-archive.log
-            exit 1
-          fi
-          python3 scripts/release/verify-app.py build/UnsignedRoomwave.xcarchive/Products/Applications/Roomwave.app --build 1 > build/pilot-artifacts/device-identity.json
-          ditto -c -k --keepParent build/UnsignedRoomwave.xcarchive build/pilot-artifacts/UnsignedRoomwave.xcarchive.zip
-      - name: Preserve runnable pilot and screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: roomwave-pilot-artifacts
-          path: build/pilot-artifacts
-          if-no-files-found: ignore
-          retention-days: 7
+          persist-credentials: false
+      - name: Configure public X OAuth client
+        run: python3 scripts/release/configure-x.py
+        env:
+          X_OAUTH_CLIENT_ID: ${{ vars.X_OAUTH_CLIENT_ID }}
+      - name: Select stable Xcode 27.2
+        run: bash scripts/release/select-xcode.sh
+      - name: Record actual Metal device capabilities
+        timeout-minutes: 2
+        run: |
+          mkdir -p build
+          xcrun swift scripts/ci/metal-inventory.swift > build/runner-metal.json
+          cat build/runner-metal.json
+      - name: Install project generator if needed
+        timeout-minutes: 6
+        run: command -v xcodegen >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+      - name: Test core, actual touch flow, native render and unsigned archive
+        timeout-minutes: 55
+        run: bash scripts/release/validate-native.sh
+        env:
+          ROOMWAVE_DIAGNOSTIC_RUNTIME: ${{ inputs.runtime_version == '27.0' && '27.0' || '' }}
+      - name: Preserve runner inventory beside native receipts
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if [[ -f build/runner-metal.json ]]; then
+            mkdir -p build/release
+            cp build/runner-metal.json build/release/runner-metal.json
+          fi
+      - name: Preserve lightweight native review evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: roomwave-native-review
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/release/evidence/*.json
+            build/release/evidence/*.png
+            build/release/evidence/*.txt
+            build/release/evidence/ui-attachments/*.json
+            build/release/evidence/ui-attachments/*.png
+            build/release/evidence/ui-attachments/*.txt
+            build/release/evidence/ui-attachments/*.ips
+            build/release/evidence/ui-attachments/*.crash
+            build/release/evidence/live-diagnostics
+            build/release/evidence/metal-diagnostics
+            build/release/*identity.json
+            build/release/native-run-start.json
+            build/release/simulator-selection.json
+            build/release/native-test.log
+            build/release/runner-metal.json
+            build/release/metal-diagnostics.log
+            build/release/diagnostic-observer.log
+            build/release/container.log
+            build/release/attachments-export.log
+            build/release/evidence-collection.json
+            build/release/recording-observer.log
+      - name: Preserve playable evidence and unsigned simulator app
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: roomwave-arcade-evidence
+          path: |
+            build/release/evidence
+            build/release/*.json
+            build/release/*.log
+            build/release/Roomwave-simulator.app.zip
+          if-no-files-found: warn
+          retention-days: 14
       - name: Preserve native test evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: roomwave-native-test-results
-          path: build/native-test-results
+          path: build/release/NativeTests.xcresult
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 14

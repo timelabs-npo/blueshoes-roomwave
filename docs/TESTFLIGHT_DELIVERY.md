@@ -1,6 +1,28 @@
-# Roomwave TestFlight delivery
+# Roomwave TestFlight identity and pilot history
+
+The active arcade rebuild is **0.3.0**. See [arcade acceptance](ARCADE_ACCEPTANCE.md), [continuity](CONTINUITY.md) and [external-beta operations](PUBLIC_BETA.md). The 0.2.0 receipt below is historical and remains preserved at `archive/20261125-pilot-1002-1`; it does not establish the new arcade's readiness.
 
 The user authorized replacing the existing Molecular/Molecule Foundry beta with Roomwave. Roomwave is delivered under the existing Apple identity below. This workflow uploads a TestFlight beta; it does not submit or publish an App Store production update.
+
+## Current v0.3 release procedure
+
+The active app is **Roomwave · Slipstream 0.3.0**. Corrected native run [45686764139](https://github.com/timelabs-npo/blueshoes-roomwave/actions/runs/45686764139) passed at source `41ed282b47bc2231f5b444914f1c8389e5635859`. Later source changes retain their own validation gates; that run must not be relabeled as evidence for another commit.
+
+Dispatch `testflight.yml` once from reviewed `main` with the exact `expected_sha`, `export_ipa=true` and `upload=true`. Read the allocated GitHub run identity and require attempt **1**. Claim the resulting `(1000 + run_number).1` build in the authoritative continuity store **before approving the protected release job**. Do not guess the next run number. The main-only environment and required reviewer remain in place.
+
+The protected job persists `release-allocation.json` as an immutable artifact before signing. Signing/export cannot upload. For an upload, the exact compiled identity, signed IPA, SHA-256 and `upload-intent.json` are preserved in a second artifact before the upload step. That step requires both artifact IDs and exclusively consumes the exact intent before invoking Apple's transporter. Workflow reruns are blocked from signing or uploading; a second invocation in the same job also cannot consume the intent twice. After a failed or interrupted upload, inspect the existing allocation/build in Apple and reconcile its actual state. A new binary needs a new explicit dispatch and a new coordinator claim, not an automatic retry.
+
+The preserved signed IPA is a release artifact, not a source-repository file. Neither artifact contains signing keys or private contact data. A receipt proves only its observed stage: `upload_accepted=false` in the pre-upload artifact is expected; the later release receipt records a successful transporter response. Public promotion additionally requires the trusted exact-run source, compiled, upload and processing receipts described in [external-beta operations](PUBLIC_BETA.md).
+
+After signing/upload, the workflow observes the exact Apple build and calls [internal finalization](INTERNAL_BETA.md) with the actual IPA identity receipt. It updates truthful beta metadata and associates only the exact build with the existing internal group. If processing or activation remains pending, reconcile that same UUID; do not upload again to poll it. Credentials and signing material remain protected.
+
+The real external Beta App Review contact was absent in the inspected Apple record. First name, last name, email and international phone must be supplied privately or entered directly by the owner. [External beta operations](PUBLIC_BETA.md) keeps exact-build review and public-link checks separate from internal availability. No public link, invitation or community post is claimed.
+
+The installed app name is Roomwave. The Apple listing was still **Molecule Foundry**. A guarded name-only PATCH requesting **Roomwave Slipstream** returned HTTP **403** at 20:06:08 UTC on 25 November 2026. No successful rename is claimed. Authorized access to that exact metadata operation, or an owner-performed change, is required. This denial is not bypassed with a different identity or broader mutation.
+
+## Archived 0.2 pilot reference
+
+**Everything below records the earlier pilot and its original procedure. Do not use its 0.2.0 payloads to finalize the new arcade.** The active procedure is above; full historical source remains on [archive/20261125-pilot-1002-1](https://github.com/timelabs-npo/blueshoes-roomwave/tree/archive/20261125-pilot-1002-1).
 
 | Field | Verified identity |
 | --- | --- |
@@ -34,6 +56,7 @@ The abandoned new-bundle plan received an Apple registration 403 and had no app 
 
 `testflight.yml` is manual and accepts:
 
+- `expected_sha`: the exact reviewed main commit; the job fails if the dispatched source differs.
 - `export_ipa=true`: validate native paths, sign and export.
 - `upload=true`: also verify the exact Apple app ID/bundle and unused build number, then upload through Xcode's transporter tooling.
 
@@ -41,7 +64,7 @@ Validation always runs shared Swift tests and the native simulator tests for pho
 
 The release job creates an ephemeral keychain, verifies the Apple-issued profile and compiled app identity, exports a signed IPA, and optionally uploads it. Secret material and the temporary keychain are removed on exit; the previous keychain search list is restored. The selected signing certificate must be included in the profile. An already installed byte-identical profile is reused and left intact; a conflicting profile is never overwritten. Artifacts contain validation evidence and receipts; signing material and the IPA are not published as repository artifacts.
 
-Build numbers use `(1000 + GITHUB_RUN_NUMBER).GITHUB_RUN_ATTEMPT`, above the existing `23.1` range. Preflight rejects a number already present in the Apple app. Marketing version is `0.2.0`. Receipts record the actual source commit, app ID, version, build, signature verification and IPA SHA-256. Apple's processing result is recorded separately with a bounded wait. Upload acceptance is not TestFlight availability.
+Build numbers use `(1000 + GITHUB_RUN_NUMBER).GITHUB_RUN_ATTEMPT`, above the existing `23.1` range. Preflight rejects a number already present in the Apple app. Marketing version now comes from the root `VERSION` file. Receipts record the actual source commit, app ID, version, build, signature verification and IPA SHA-256. Apple's processing result is recorded separately with a bounded wait. Upload acceptance is not TestFlight availability.
 
 ## Internal availability
 

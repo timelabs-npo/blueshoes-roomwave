@@ -11,7 +11,7 @@ or noncommercial-only assets were used.
 | Entity name | Content and provenance |
 | --- | --- |
 | `Skin` | Quaternius base body, eyes and eyebrows, with project-created flat materials. |
-| `Coat` | Project-derived jacket, boots and gauntlets, plus a new cape and emblem. |
+| `Coat` | Project-derived jacket, trousers, knee panels, hood, boots and gauntlets, plus split coat tails, narrow cyan piping and a warm chest emblem. |
 | `SkeletonOverlay` | Project-created stylized joint/bone helper geometry. |
 | `MuscleOverlay` | Project-created stylized muscle-shaped helper geometry. |
 | `skeletonRig` | An equivalent rig within each layer: Quaternius humanoid joints plus a project-created cape joint. |
@@ -22,10 +22,27 @@ the cape has a simple authored motion. These boundaries must remain visible in t
 pilot's layer inspector and documentation.
 
 The asset is Y-up, faces -Z, and has approximately 1 metre rest height. It contains
-66 joints per layer, 36 skinned mesh parts and 22,912 triangles. `RoomwaveGlide` is a project-
+66 joints per layer, 42 skinned mesh parts and 26,892 triangles. `RoomwaveGlide` is a project-
 authored two-second loop, 61 samples at 30 fps. Use a parent entity for game-driven
 lean/hover. Toggle the four named layer containers recursively; skin and clothing
 normally occlude the internal helper layers. The runtime may default helpers off.
+
+The November 25 arcade art revision changes the neutral outstretched pose to a
+crouched stance with lowered, bent arms and restrained torso balance. Both legs
+hold the same flex throughout the loop; the authored root corrects to the actual
+deformed sole height rather than adding a floating bob. Skin minimum Y remains
+0.000034 m across all 61 exported samples; the clothing sole extends to -0.004818 m.
+The highest animated skin point is 0.9122 m and the highest clothing point 0.9199 m.
+The original one-metre rest scale, game root placement and equivalent layer rigs
+remain intact. This is authored character motion, not muscle or cloth simulation.
+
+The split coat has a centre opening and shaped folds instead of the previous flat
+magenta panel. Navy/teal materials use roughness 0.64 and metallic 0.025, with small
+cyan and warm accents. These are material inputs, not a claim about their exact
+appearance under every runtime light. The controlled front/rear Blender proofs in
+`docs/previews/Avatar-Surf-Stance-Front.png` and `Avatar-Surf-Stance-Rear.png` show the
+actual revised mesh and animation pose; they are not game screenshots. Their board
+is a proof-scene prop, not the runtime board.
 
 Each named layer is its own `SkelRoot` under an ordinary top-level `Xform` and has
 an equivalent 66-joint skeleton and loop. A mesh is bound to only one skeleton.
@@ -42,15 +59,21 @@ renderable-component and animation checks before release.
 - Imported the glTF into Blender 4.3.2 and authored the derived layers and action.
 - Exported through OpenUSD `usd-core` 26.11 and reopened the resulting USDZ.
 - Validated joint topology and skinning queries for every mesh.
-- Evaluated skinned vertices at loop samples 0, 15, 30 and 60; bounds were finite,
-  approximately one metre high, and loop endpoints agreed.
-- Rendered the derived model for the opaque app icon and preview.
+- Evaluated every skinned vertex at all 61 authored samples for each of the four
+  layers. Coordinates are finite, joint weights are normalized, soles are planted,
+  every layer has measurable motion and loop endpoints agree exactly in the export.
+  The detailed measured bounds and maximum motion are in `AVATAR_ASSET_VALIDATION.json`.
+- Rendered the revised mesh from the front and rear with Blender Cycles, then
+  inspected both images. The existing shipped app icon predates this art revision;
+  the rebuild also emits a candidate icon for the coordinator to review separately.
 - Ran the committed rebuild pipeline from the glTF/bin source snapshot: all
   generated mesh/joint/animation data matched the source preparation output.
 - Rendered each layer independently; see `docs/previews` for actual isolated views.
 
-These checks do **not** establish RealityKit import, animation playback, frame rate
-or visual quality on an iPhone. Simulator/device asset loading is a separate gate.
+The preceding asset revision passed the native layer/animation tests in run
+`45686764139`. The new USDZ must pass that native gate again: the checks above do
+**not** establish its RealityKit import, animation playback, frame rate or visual
+quality on an iPhone. Simulator/device asset loading is a separate gate.
 
 ## Rebuilding
 

@@ -1,55 +1,72 @@
-# Blueshoes: Roomwave
+# Twitter Surfer
 
-Turn a space or a photo into a stylised racing circuit, ride a layered animated character, and bank your score before the next risky turn.
+**Hold to charge. Release to soar. Dive, release, and stick the landing.**
 
-Roomwave is a native Swift/SwiftUI/ARKit/RealityKit pilot targeting iOS 27, with iPhone 18 Pro Max as the reference device. The project is MIT-licensed; third-party artwork retains its own notices.
+Twitter Surfer is a native one-touch kinetic surfing arcade in a low-poly neon landscape. Timing changes your flight arc, momentum and score. The v0.3 rebuild replaces the original flat steering workbench with a full-screen game.
 
-## Pilot features
+Personal and community X activity can shape the next current and combine with local LiDAR terrain. OAuth uses a native public client and device-only Keychain storage. The owner-created X app `xsurf` now has its public client ID configured. Real sign-in and API entitlement still require validation on the built app. The ordinary game needs no social account. See [X integration and release status](docs/TWITTER_SURFER.md) and [prepared registration settings](docs/X_APP_REGISTRATION.json).
 
-- **Photo maps:** ImageIO decodes and orients an image locally. Vision attention saliency, contrast and Sobel features produce an inferred 2.5D sample. The generated circuit depends on those features. A single photo is not treated as calibrated depth or a measured reconstruction.
-- **LiDAR tracks:** capability-checked ARKit mesh samples are transformed into a common gravity-aligned frame, bounded, checked for freshness and converted into a stylised circuit. Scan coverage and device quality still require physical testing.
-- **Playable bend pressure:** steering counters curvature-dependent outward pressure. An initial two-second grace period and three-second ramp allow orientation; a bank request saves the chain at the next gate.
-- **Layered rider:** a redistributed CC0 humanoid, articulated rig, authored glide animation, and separately switchable Skin, Coat, SkeletonOverlay and MuscleOverlay groups. The visible skeleton/muscle overlays are stylised animation helpers, not medical anatomy or biological simulation.
-- **Local sharing:** the user can review and export final track geometry and rules. Raw camera frames, photographs, mesh samples and local capture IDs are excluded from the challenge descriptor.
-- **Synthetic demo:** an explicitly labelled, invented track source is available without camera or photo access.
+## The arcade
 
-## Development
+- **Neon Dawn:** learn charge, release and clean landings with a forgiving opening.
+- **Low Orbit:** longer aerial lines and high gold rings.
+- **Black Current:** barriers, low ceilings, dive windows and recovery.
+- Shields, execution-based combo scoring, medals, saved personal bests and immediate retry.
+- Original synthesized music and event sounds, haptics, pause/background recovery and Reduce Motion.
+- A visibly animated, licensed layered rider. Skeleton/muscle helper layers stay out of the playfield.
+- User-initiated score cards, authored-course challenge links and an editable X composer. Likes and reposts never add game points.
 
-Use stable Xcode 27.2 and XcodeGen. The deployment target is iOS 27.0.
+Photo and LiDAR creation are secondary. Actual local image/mesh features produce restrained terrain variations around a known encounter sequence. Raw input stays on the device. This is creative interpretation, not a measured room reconstruction. The latest created course remains selectable locally; custom routes are not falsely advertised as shared challenges.
+
+## Beta status and evidence
+
+The active target is **0.3.0**, using the existing authorized Apple bundle. The older internal TestFlight pilot **0.2.0 (1002.1)** is preserved in an archive branch. A public-beta URL will be added only after the new exact build receives external approval and the link is verified.
+
+- [Arcade acceptance and actual worker receipts](docs/ARCADE_ACCEPTANCE.md)
+- [Native validation runs](https://github.com/timelabs-npo/blueshoes-roomwave/actions/workflows/unsigned-ios.yml)
+- [TestFlight delivery and historical pilot](docs/TESTFLIGHT_DELIVERY.md)
+- [External beta operations](docs/PUBLIC_BETA.md)
+- [Privacy policy](docs/PRIVACY.md)
+
+A simulator pass does not establish physical-device frame pacing, thermal behavior, LiDAR quality or human enjoyment. Apple Arcade consideration and awards are separate outcomes.
+
+## Build
+
+Use stable Xcode 27.2 and XcodeGen. Deployment target: iOS 27.0; iPhone 18 Pro Max is the reference simulator/device target.
 
 ```sh
 swift test
-cd apps/ios
-xcodegen generate --spec project.yml
-open Roomwave.xcodeproj
+xcodegen generate --spec apps/ios/project.yml --project apps/ios
+open apps/ios/Roomwave.xcodeproj
 ```
 
-Shared gameplay and geometry live in Sources/RoomwaveCore. Native code lives in apps/ios/Roomwave.
-The unsigned workflow separately checks the core, native build and simulator tests. A successful simulator result cannot establish LiDAR quality, frame-rate or thermal behavior on an iPhone.
-Signing and TestFlight delivery use protected release configuration, never checked-in credentials.
+| Module | Responsibility |
+| --- | --- |
+| RoomwaveArcade | Fixed-step surfing, authored courses, encounters, scoring, replay |
+| RoomwaveCreator | Bounded photo/mesh-inspired terrain adaptation |
+| RealityKit scene | Elevated ribbon, rider, camera, biome geometry and effects |
+| SwiftUI / UIKit | Full-screen flow, compact HUD, direct touch, accessibility |
+| AVFoundation | Original cached audio and interruption handling |
+| RoomwaveCore | Existing photo/scan normalization and isolated legacy pilot |
 
-## TestFlight identity
+The native gate executes production Swift tests, hosted asset/photo tests and ordinary XCUITest touch input. It preserves real ARView captures, full UI screenshots/video and exact source identity. Signing and Apple credentials remain in protected release configuration.
 
-The owner has authorized this Roomwave pilot to use the existing **MoleculeFoundry** Apple app record.
+## Continuity
 
-| Setting | Pilot value |
-|---|---|
-| Bundle identifier | `org.timelabs.moleculefoundry` |
-| Apple app ID | `6837899703` |
-| Developer team | `398XACWZ7G` |
-| Beta version | `0.2.0` |
+Three bounded Codex lanes own gameplay, presentation and experience; one coordinator owns shared contracts and integration. Work persists through an atomic task store with leases, exact-base checks, explicit reviews, limited retries and duplicate-release claims.
 
-The native product and its display name remain Roomwave. Signed delivery is controlled by the protected TestFlight workflow; successful upload, Apple processing and tester availability must each be verified for the actual build. See [delivery instructions](docs/TESTFLIGHT_DELIVERY.md).
+```sh
+python3 -m unittest discover -s tests/continuity -v
+python3 scripts/continuity/supervisor.py --state-dir ops/continuity-state status
+python3 scripts/continuity/supervisor.py --state-dir ops/continuity-state reconcile
+```
 
-## Design and verification
+Use one authoritative state directory per project coordinator. Existing Wd receipts are imported as observations, never treated as local PIDs. See [operating instructions](docs/CONTINUITY.md), [shared interfaces](docs/ARCADE_CONTRACTS.md) and [rebuild direction](docs/ARCADE_REBUILD.md).
 
-- [Product brief](docs/PRODUCT_BRIEF_RU.md)
-- [LiDAR specification](docs/LIDAR_SPEC.md)
-- [Pilot contracts](docs/PILOT_CONTRACTS.md)
-- [Gameplay implementation](docs/PILOT_GAMEPLAY.md)
-- [Photo analysis](docs/PILOT_PHOTO.md)
-- [Avatar resources and provenance](docs/AVATAR_ASSETS.md)
-- [Pilot swarm receipt](docs/PILOT_SWARM_RUN.md)
+## Assets and model resources
 
-Photo analysis and race execution do not require a remote model service.
-Public challenge hosting, X OAuth/API, social reputation, video capture and server-side score verification are separate future features.
+Code is MIT-licensed. Third-party art retains its own notices. The CC0 humanoid and derivative rig/layers have [source and provenance](docs/AVATAR_ASSETS.md). The skeleton/muscle overlays are stylized animation helpers, not medical anatomy.
+
+The current photo path uses local ImageIO/Vision features. [Apple's Hugging Face Core ML depth model is a documented evaluation candidate](docs/PHOTO_MODEL_REVIEW.md); its weights are not bundled or claimed as already running.
+
+[Community beta copy](docs/COMMUNITY_BETA_COPY.md) is a draft. Preparing it does not publish a post or invite testers.
