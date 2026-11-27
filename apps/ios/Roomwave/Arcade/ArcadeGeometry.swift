@@ -51,16 +51,50 @@ enum ArcadeGeometry {
         var consumed = false
     }
 
+    @MainActor struct Pollinator {
+        let root: Entity
+        let origin: SIMD3<Float>
+        let right: SIMD3<Float>
+        let forward: SIMD3<Float>
+        let distance: Double
+        let phase: Float
+        let wings: [ModelEntity]
+
+        func update(distance riderDistance: Double, time: Float, reducedMotion: Bool) {
+            let visible = riderDistance - 12 <= distance && distance <= riderDistance + 90
+            if root.isEnabled != visible { root.isEnabled = visible }
+            guard visible else { return }
+            // Positions come from absolute time, not frame integration; Retry is deterministic.
+            let t = reducedMotion ? 0 : time
+            let angle = phase + t * 1.1
+            let drift: Float = reducedMotion ? 0 : (wings.isEmpty ? 0.46 : 0.62)
+            root.position = origin + (right * cos(angle) + forward * sin(angle)) * drift +
+                SIMD3<Float>(0, sin(angle * 1.6) * drift * 0.38, 0)
+            let flap: Float = reducedMotion ? 0.4 : 0.24 + 0.63 * sin(t * 17 + phase)
+            for (index, wing) in wings.enumerated() {
+                wing.orientation = simd_quatf(angle: index == 0 ? flap : -flap, axis: SIMD3(0, 0, 1))
+            }
+            // Tiny steady markers in Reduce Motion; no strobe, light or particle emitters.
+            if wings.isEmpty {
+                let shimmer: Float = reducedMotion ? 1 : 0.85 + 0.15 * sin(angle * 0.7)
+                root.scale = SIMD3(repeating: shimmer)
+            }
+        }
+    }
+
     @MainActor final class CourseArt {
         let root: Entity
         let sky: Entity
         let palette: Palette
         var encounters: [EncounterArt]
         let stationCount: Int
+        let pollinators: [Pollinator]
 
-        init(root: Entity, sky: Entity, palette: Palette, encounters: [EncounterArt], stationCount: Int) {
+        init(root: Entity, sky: Entity, palette: Palette, encounters: [EncounterArt],
+             stationCount: Int, pollinators: [Pollinator]) {
             self.root = root; self.sky = sky; self.palette = palette
             self.encounters = encounters; self.stationCount = stationCount
+            self.pollinators = pollinators
         }
     }
 
@@ -137,7 +171,7 @@ enum ArcadeGeometry {
                                   high: side * 0.5 + 0.022, lift: 0.012)
             root.addChild(ModelEntity(mesh: halo, materials: [UnlitMaterial(color: rgb(0.025, 0.28, 0.34))]))
         }
-        try buildLandscape(course: course, stations: stations, parent: root, palette: palette)
+        let pollinators = try buildLandscape(course: course, stations: stations, parent: root, palette: palette)
         let sky = try buildHorizon(course: course, palette: palette)
         root.addChild(sky)
 
@@ -151,7 +185,7 @@ enum ArcadeGeometry {
             encounters.append(EncounterArt(encounter: encounter, entity: entity))
         }
         return CourseArt(root: root, sky: sky, palette: palette,
-                         encounters: encounters, stationCount: stations.count)
+                         encounters: encounters, stationCount: stations.count, pollinators: pollinators)
     }
 
     private static func sample(_ course: CompiledSurfCourse) throws -> [Station] {
@@ -428,11 +462,30 @@ enum ArcadeGeometry {
     }
 
     private static func buildLandscape(course: CompiledSurfCourse, stations: [Station], parent: Entity,
-                                        palette: Palette) throws {
+                                        palette: Palette) throws -> [Pollinator] {
         var facets = [MeshBuilder(), MeshBuilder(), MeshBuilder(), MeshBuilder()]
         let strideCount = max(1, stations.count / 64)
         let sparse = stride(from: 0, to: stations.count, by: strideCount).map { stations[$0] }
         let biome = course.definition.biome
+        var plants = [MeshBuilder(), MeshBuilder(), MeshBuilder(), MeshBuilder()]
+        var insects: [Pollinator] = []
+        let livingTerraces = biome != .orbit && SurfCatalog.featured.contains { $0.id == course.definition.id }
+        let insectBody = livingTerraces ? MeshResource.generateSphere(radius: 0.055) : nil
+        var wingMesh: MeshResource?
+        if livingTerraces, biome == .dawn {
+            var wing = MeshBuilder()
+            let root = SIMD3<Float>(0, 0, 0)
+            let fore = SIMD3<Float>(0.14, 0.025, -0.24)
+            let edge = SIMD3<Float>(0.36, 0.05, -0.15)
+            let seam = SIMD3<Float>(0.21, 0.065, 0.015)
+            let hind = SIMD3<Float>(0.28, 0.015, 0.105)
+            let tail = SIMD3<Float>(0.11, 0.035, 0.17)
+            for (a, b, c) in [(root, fore, edge), (root, edge, seam), (root, seam, hind), (root, hind, tail)] {
+                wing.triangle(a, b, c)
+                wing.triangle(a, c, b)
+            }
+            wingMesh = try wing.resource(named: "ButterflySilk")
+        }
         // Original spans are linear, exactly like the dense visual sampler. Using
         // their maximum endpoint width keeps the same conservative corridor while
         // avoiding a dense-sample scan for every new decorative facet.
@@ -449,6 +502,11 @@ enum ArcadeGeometry {
         }
         func add(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, shade: Int) {
             if outsideRoad(a, b, c) { facets[shade % 4].triangle(a, b, c) }
+        }
+        func plant(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, index: Int) {
+            guard outsideRoad(a, b, c) else { return }
+            plants[index].triangle(a, b, c)
+            plants[index].triangle(a, c, b)
         }
         for index in sparse.indices {
             let station = sparse[index]
@@ -500,6 +558,80 @@ enum ArcadeGeometry {
                     let d = next.center + next.right * side * (next.width * 0.5 + 29) - SIMD3<Float>(0, 3.5, 0)
                     if side > 0 { add(a, c, b, shade: 3); add(b, c, d, shade: 0) }
                     else { add(a, b, c, shade: 3); add(b, d, c, shade: 0) }
+                    guard livingTerraces, station.distance >= 0, outsideRoad(a, b, c), index % 2 == (side > 0 ? 0 : 1) else { continue }
+
+                    // Barycentric positions on the actual inner terrace triangle.
+                    // Every blade and petal is checked against all route spans, not only its own.
+                    var bloom: SIMD3<Float>? = nil
+                    for tuft in 0..<4 {
+                        let p = phase + Float(tuft) * 2.41
+                        let along = (Float(tuft) + 0.35 + 0.22 * sin(p)) * 0.15
+                        let across = 0.024 + 0.057 * abs(cos(p))
+                        let ground = a + (b - a) * along + (c - a) * across
+                        for leaf in 0..<4 {
+                            let q = p + Float(leaf) * 1.51
+                            let blade = station.right * cos(q) + forward * sin(q)
+                            let foot = ground + blade * 0.075
+                            let tip = ground + blade * (0.18 + 0.14 * abs(sin(q))) +
+                                SIMD3<Float>(0, 0.34 + 0.42 * abs(cos(q)), 0)
+                            let v = simd_cross(SIMD3<Float>(0, 1, 0), blade) * 0.037
+                            plant(foot + v, foot - v, tip, index: leaf % 2)
+                        }
+                        if (index + tuft) % 3 == 0 {
+                            let top = ground + SIMD3<Float>(0, 0.62, 0)
+                            let stem = station.right * 0.026
+                            plant(ground - stem, ground + stem, top, index: 0)
+                            plant(ground - forward * 0.026, ground + forward * 0.026, top, index: 0)
+                            for petal in 0..<5 {
+                                let angle = Float(petal) * (.pi * 0.4) + p
+                                let radial = station.right * cos(angle) + forward * sin(angle)
+                                let tangent = station.right * -sin(angle) + forward * cos(angle)
+                                let tip = top + radial * 0.20 + SIMD3<Float>(0, 0.085, 0)
+                                let left = top + radial * 0.105 + tangent * 0.070
+                                let right = top + radial * 0.105 - tangent * 0.070
+                                let color = 2 + ((index + tuft) % 2)
+                                plant(top, left, right, index: color)
+                                plant(left, tip, right, index: color)
+                            }
+                            bloom = top
+                        }
+                    }
+                    if let bloom, let insectBody, (index % 8 == (side > 0 ? 0 : 3) || insects.isEmpty), insects.count < 18 {
+                        let origin = bloom + SIMD3<Float>(0, biome == .dawn ? 1.3 : 0.78, 0)
+                        // The whole animated envelope stays beyond the playable corridor.
+                        let pad: Float = 1.1
+                        let p0 = origin - station.right * pad - forward * pad
+                        let p1 = origin + station.right * pad - forward * pad
+                        let p2 = origin + station.right * pad + forward * pad
+                        let p3 = origin - station.right * pad + forward * pad
+                        if outsideRoad(p0, p1, p2) && outsideRoad(p0, p2, p3) {
+                            let insect = Entity()
+                            let butterfly = biome == .dawn
+                            insect.name = butterfly ? "DuneButterfly" : "TerraceFirefly"
+                            insect.position = origin
+                            insect.isEnabled = false
+                            var wings: [ModelEntity] = []
+                            if butterfly, let wingMesh {
+                                for side in [Float(-1), 1] {
+                                    let wing = ModelEntity(mesh: wingMesh, materials: [UnlitMaterial(color: rgb(0.91, 0.49, 0.70))])
+                                    // Rotate the identical right-wing mesh into its mirrored orientation via parent.
+                                    let mount = Entity()
+                                    mount.orientation = simd_quatf(angle: side < 0 ? .pi : 0, axis: SIMD3(0, 0, 1))
+                                    mount.addChild(wing)
+                                    insect.addChild(mount)
+                                    wings.append(wing)
+                                }
+                            }
+                            let body = ModelEntity(mesh: insectBody, materials: [
+                                UnlitMaterial(color: butterfly ? rgb(0.35, 0.25, 0.42) : rgb(0.67, 0.84, 0.35))
+                            ])
+                            if butterfly { body.scale.z = 2.7 }
+                            insect.addChild(body)
+                            parent.addChild(insect)
+                            insects.append(Pollinator(root: insect, origin: origin, right: station.right, forward: forward,
+                                                      distance: station.distance, phase: phase, wings: wings))
+                        }
+                    }
                 }
             }
         }
@@ -509,6 +641,17 @@ enum ArcadeGeometry {
             parent.addChild(ModelEntity(mesh: try facets[index].resource(named: "LandscapeFacets_\(index)"),
                                         materials: [UnlitMaterial(color: colors[index])]))
         }
+        let natureColors: [UIColor] = biome == .dawn
+            ? [rgb(0.31, 0.38, 0.18), rgb(0.48, 0.52, 0.22), rgb(0.88, 0.48, 0.32), rgb(0.87, 0.61, 0.73)]
+            : [rgb(0.16, 0.34, 0.28), rgb(0.24, 0.47, 0.34), rgb(0.57, 0.58, 0.83), rgb(0.65, 0.43, 0.66)]
+        for index in plants.indices where !plants[index].indices.isEmpty {
+            let name = index < 2 ? "Terrace Grass \(index)" : "Terrace Wildflowers \(index)"
+            let entity = ModelEntity(mesh: try plants[index].resource(named: name),
+                                     materials: [UnlitMaterial(color: natureColors[index])])
+            entity.name = name
+            parent.addChild(entity)
+        }
+        return insects
     }
 
     private static func buildHorizon(course: CompiledSurfCourse, palette: Palette) throws -> Entity {

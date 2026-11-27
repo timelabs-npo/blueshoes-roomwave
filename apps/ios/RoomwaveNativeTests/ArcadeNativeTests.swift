@@ -5,6 +5,39 @@ import RoomwaveArcade
 
 final class ArcadeNativeTests: XCTestCase {
     @MainActor
+    func testLivingDunesUseBiomeAndRespectReduceMotion() throws {
+        for (route, insect, wings) in [("neon-dawn", "DuneButterfly", 2), ("prism-break", "TerraceFirefly", 0)] {
+            let definition = try XCTUnwrap(SurfCatalog.featured.first { $0.id == route })
+            let course = try SurfCourseCompiler.compile(definition)
+            let art = try ArcadeGeometry.build(course: course)
+            XCTAssertNotNil(art.root.findEntity(named: "Terrace Grass 0"))
+            XCTAssertNotNil(art.root.findEntity(named: "Terrace Wildflowers 2"))
+            XCTAssertLessThanOrEqual(art.pollinators.count, 18)
+            let creature = try XCTUnwrap(art.pollinators.first)
+            XCTAssertEqual(creature.root.name, insect)
+            XCTAssertEqual(creature.wings.count, wings)
+            creature.update(distance: creature.distance, time: 1, reducedMotion: false)
+            XCTAssertTrue(creature.root.isEnabled)
+            let moving = creature.root.position
+            creature.update(distance: creature.distance, time: 3, reducedMotion: false)
+            XCTAssertNotEqual(creature.root.position, moving)
+            creature.update(distance: creature.distance, time: 12, reducedMotion: true)
+            XCTAssertEqual(creature.root.position, creature.origin)
+            let still = creature.root.transform
+            creature.update(distance: creature.distance, time: 70, reducedMotion: true)
+            XCTAssertEqual(creature.root.transform.translation, still.translation)
+            XCTAssertEqual(creature.root.transform.scale, still.scale)
+            creature.update(distance: creature.distance + 40, time: 1, reducedMotion: false)
+            XCTAssertFalse(creature.root.isEnabled)
+        }
+        let orbital = try XCTUnwrap(SurfCatalog.featured.first { $0.id == "low-orbit" })
+        let art = try ArcadeGeometry.build(course: SurfCourseCompiler.compile(orbital))
+        XCTAssertTrue(art.pollinators.isEmpty)
+        XCTAssertNil(art.root.findEntity(named: "Terrace Grass 0"))
+    }
+
+
+    @MainActor
     func testChallengeParsingDoesNotLoadUntrustedOrMalformedRoutes() {
         let session = ArcadeSession()
         for raw in [

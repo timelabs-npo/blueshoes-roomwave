@@ -243,6 +243,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         effects.update(deltaTime: dt, rider: foot, forward: forward, airborne: !state.grounded,
                        speed: Float(state.speed), reducedMotion: reducedMotion)
         updateEncounters(distance: state.distance, cursor: state.encounterCursor)
+        updatePollinators(distance: state.distance, time: Double(state.tick) / 60, reducedMotion: reducedMotion)
         if state.phase != .running {
             // A terminal run freezes at impact. Remove only the nearby foreground
             // hazard art from that frozen composition; scoring/collision stay in core.
@@ -287,6 +288,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         ghostBoard?.isEnabled = false
         effects?.clear()
         updateEncounters(distance: 0, cursor: 0)
+        updatePollinators(distance: 0, time: time, reducedMotion: reducedMotion)
         // Bounded home drift only. No orbit when reduced motion is requested.
         let elapsed = time.isFinite ? time.truncatingRemainder(dividingBy: 40) : 0
         let drift = reducedMotion ? Float(0) : sin(Float(elapsed) * (.pi / 20)) * 0.7
@@ -294,6 +296,14 @@ final class ArcadeSceneController: ArcadeSceneDriving {
                      mode: .preview, dt: 1 / 60, reducedMotion: reducedMotion,
                      snap: true, previewOffset: drift)
         wasPreview = true
+    }
+
+    private func updatePollinators(distance: Double, time: TimeInterval, reducedMotion: Bool) {
+        guard let art else { return }
+        let seconds = Float(time.isFinite ? max(0, min(36_000, time)) : 0)
+        for pollinator in art.pollinators {
+            pollinator.update(distance: distance, time: seconds, reducedMotion: reducedMotion)
+        }
     }
 
     func teardown() {
