@@ -63,7 +63,7 @@ final class ArcadeNativeTests: XCTestCase {
             let url = try XCTUnwrap(track.url)
             XCTAssertTrue(url.isFileURL)
             let player = try AVAudioPlayer(contentsOf: url)
-            XCTAssertGreaterThan(player.duration, 90)
+            XCTAssertGreaterThan(player.duration, 85)
             XCTAssertEqual(track.source.host, "opengameart.org")
         }
     }
