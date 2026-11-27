@@ -8,6 +8,7 @@ struct ArcadeRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var systemReducedMotion
     @Environment(\.openURL) private var openURL
+    @State private var codexPresented = false
     @State private var settingsPresented = false
     @State private var creatorPresented = false
     @State private var socialPresented = false
@@ -72,6 +73,7 @@ struct ArcadeRootView: View {
         }
         .onChange(of: systemReducedMotion) { _, value in session.setSystemReducedMotion(value) }
         .onDisappear { session.pause() }
+        .sheet(isPresented: $codexPresented) { ArcadeRoleCodex() }
         .sheet(isPresented: $settingsPresented) { settings }
         .sheet(isPresented: $creatorPresented, onDismiss: { session.setActive(scenePhase == .active) }) {
             ArcadeCreatorView { session.useInspiredCourse($0) }
@@ -94,6 +96,11 @@ struct ArcadeRootView: View {
             HStack(alignment: .top) {
                 brand(compact: compact)
                 Spacer()
+                Button { codexPresented = true } label: {
+                    Image(systemName: "person.3.sequence.fill").font(.title3)
+                        .frame(width: 48, height: 48)
+                }.accessibilityLabel("Crews")
+                    .accessibilityIdentifier("arcade.crews")
                 Button { settingsPresented = true } label: {
                     Image(systemName: "slider.horizontal.3").font(.title3)
                         .frame(width: 48, height: 48)
