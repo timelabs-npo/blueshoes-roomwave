@@ -1,0 +1,13 @@
+xsurf Radio: two MintoDog racing tracks (CC0 1.0 Universal).
+License: https://creativecommons.org/publicdomain/zero/1.0/
+Audio is vendored byte-for-byte. No modifications, streaming, or implied endorsement.
+
+Neon Sign Circuit (Climax Remake) | 160 BPM | MintoDog
+https://opengameart.org/content/neon-sign-circuit-remake
+https://opengameart.org/sites/default/files/neon_sign_circuit_climax_remake_bpm160.mp3
+RadioNeonSignCircuit.mp3 SHA-256 1d8611beb360cbe0617911d90bcbd0c7ebe673009218696448fa3789e468343f
+
+Darkness Road (Climax Remake) | 180 BPM | MintoDog
+https://opengameart.org/content/darkness-roadremeke
+https://opengameart.org/sites/default/files/darkness_road_climax_remake_bpm180.mp3
+RadioDarknessRoad.mp3 SHA-256 ddf49bdeb59b94f6df26eaee4f125b9b713bf217871e8a3766eaa5235c9cc862

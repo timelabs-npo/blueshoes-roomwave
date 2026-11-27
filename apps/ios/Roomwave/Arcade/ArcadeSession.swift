@@ -238,6 +238,8 @@ final class ArcadeSession: ObservableObject {
         }
     }
 
+    var raceTrackCredit: ArcadeRadioTrack? { audio.playedRadioTrack }
+
     func play() {
         guard !isLoading, errorMessage == nil, isActive, let course else { return }
         held = false; cancelInputOnNextTick = false
@@ -247,6 +249,7 @@ final class ArcadeSession: ObservableObject {
         result = nil; previousBest = nil; tutorialCue = .charge
         screen = .playing
         publishHUD(now: CACurrentMediaTime())
+        audio.beginNewRace()
         audio.configure(preferences, running: true)
         startClock(preview: false)
     }

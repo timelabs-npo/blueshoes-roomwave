@@ -1,17 +1,24 @@
 import AVFoundation
+import Darwin
 import UIKit
 import RoomwaveArcade
 
-/// Original oscillator music and cues, synthesized once off the audio render thread.
-/// Four reusable cue nodes bound polyphony; no source-node callback or streamed media.
+/// Live cues and a local radio rotation. Synthesized music is an offline fallback.
 @MainActor
 final class ArcadeAudio: NSObject {
-    private enum Cue: Int, CaseIterable { case bed, launch, landing, ring, boost, hit, finish }
+    private enum Cue: Int, CaseIterable { case launch, landing, ring, boost, hit, finish }
+    private enum Stem: Int, CaseIterable { case pulse, drive, air }
     private enum SessionState: Equatable { case inactive, active, uncertain }
     private enum SessionOperation: Equatable { case activating, deactivating }
     private let session = AVAudioSession.sharedInstance()
     private let engine = AVAudioEngine()
-    private let bed = AVAudioPlayerNode()
+    private var music: [AVAudioPlayerNode] = []
+    private var lastMusicMixTime: TimeInterval?
+    private var musicEnergy = 0.0
+    private var radio: AVAudioPlayer?
+    private var radioIndex = -1
+    private var radioUnavailable = false
+    private(set) var playedRadioTrack: ArcadeRadioTrack?
     private var voices: [AVAudioPlayerNode] = []
     private var buffers: [AVAudioPCMBuffer] = []
     private var voiceIndex = 0
@@ -56,7 +63,7 @@ final class ArcadeAudio: NSObject {
             notice = "Audio is unavailable. You can still play."; return
         }
         var preparedBuffers: [AVAudioPCMBuffer] = []
-        preparedBuffers.reserveCapacity(Cue.allCases.count)
+        preparedBuffers.reserveCapacity(Stem.allCases.count + Cue.allCases.count)
         for sample in samples {
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format,
                 frameCapacity: AVAudioFrameCount(sample.count)), let channel = buffer.floatChannelData?[0] else {
@@ -76,8 +83,11 @@ final class ArcadeAudio: NSObject {
             notice = "Audio is unavailable. You can still play."; return
         }
         buffers = preparedBuffers
-        engine.attach(bed)
-        engine.connect(bed, to: engine.mainMixerNode, format: format)
+        for _ in Stem.allCases {
+            let node = AVAudioPlayerNode()
+            engine.attach(node); engine.connect(node, to: engine.mainMixerNode, format: format)
+            music.append(node)
+        }
         for _ in 0..<4 {
             let node = AVAudioPlayerNode()
             engine.attach(node); engine.connect(node, to: engine.mainMixerNode, format: format)
@@ -88,6 +98,39 @@ final class ArcadeAudio: NSObject {
         prepared = true
         self.preparationTask = nil
         reconcileSession()
+    }
+
+    func beginNewRace() {
+        stopMusic()
+        radio?.stop()
+        radio = nil
+        let count = ArcadeRadioTrack.rotation.count
+        radioIndex = count == 0 ? -1 : (radioIndex + 1) % count
+        radioUnavailable = false
+        playedRadioTrack = nil
+    }
+
+    private func startRadio() -> Bool {
+        guard !radioUnavailable, ArcadeRadioTrack.rotation.indices.contains(radioIndex) else {
+            return false
+        }
+        let track = ArcadeRadioTrack.rotation[radioIndex]
+        if radio == nil {
+            guard let url = track.url, let player = try? AVAudioPlayer(contentsOf: url) else {
+                radioUnavailable = true
+                return false
+            }
+            player.numberOfLoops = -1
+            player.volume = 0.23
+            radio = player
+        }
+        guard let radio, radio.isPlaying || radio.play() else {
+            radio = nil
+            radioUnavailable = true
+            return false
+        }
+        playedRadioTrack = track
+        return true
     }
 
     func configure(_ preferences: ArcadePreferences, running: Bool) {
@@ -169,10 +212,21 @@ final class ArcadeAudio: NSObject {
         guard wantsAudio, running, sessionState == .active else { return }
         do {
             if !engine.isRunning { try engine.start() }
-            if !bed.isPlaying {
-                bed.scheduleBuffer(buffers[Cue.bed.rawValue], at: nil, options: .loops, completionHandler: nil)
-                bed.volume = 0.13
-                bed.play()
+            if startRadio() {
+                notice = nil
+                return
+            }
+            if lastMusicMixTime == nil {
+                // All stems have exactly the same length and start at one host time.
+                // Schedule once per run/resume. Intensity never replaces or seeks loops.
+                let host = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: 0.025)
+                let downbeat = AVAudioTime(hostTime: host)
+                for (index, node) in music.enumerated() {
+                    node.scheduleBuffer(buffers[index], at: nil, options: .loops, completionHandler: nil)
+                    node.volume = index == Stem.pulse.rawValue ? 0.34 : 0
+                    try node.playAudio(at: downbeat)
+                }
+                lastMusicMixTime = ProcessInfo.processInfo.systemUptime
             }
             notice = nil
         } catch {
@@ -184,10 +238,19 @@ final class ArcadeAudio: NSObject {
     }
 
     func update(speed: Double, charge: Double) {
-        guard running, preferences.soundEnabled, engine.isRunning else { return }
-        let energy = min(1, max(0, (speed - 10) / 20))
-        bed.volume = Float(0.10 + energy * 0.10 + min(1, max(0, charge)) * 0.035)
-        bed.pan = Float(min(1, max(0, charge)) * 0.12)
+        guard running, preferences.soundEnabled, engine.isRunning,
+              let previousTime = lastMusicMixTime else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        lastMusicMixTime = now
+        let dt = min(0.25, max(0, now - previousTime))
+        let target = min(1, max(0, (speed - 10) / 20 + 0.20 * charge))
+        // A short swell on acceleration; release more slowly so the rhythm holds
+        // through landings. Percussion and the high arpeggio emerge independently.
+        let tau = target > musicEnergy ? 0.19 : 0.54
+        musicEnergy += (target - musicEnergy) * (1 - exp(-dt / tau))
+        let lift = max(0, (musicEnergy - 0.42) / 0.58)
+        music[Stem.drive.rawValue].volume = Float(0.34 * musicEnergy)
+        music[Stem.air.rawValue].volume = Float(0.29 * lift)
     }
 
     func play(_ event: SurfEvent) {
@@ -202,12 +265,12 @@ final class ArcadeAudio: NSObject {
         case .finish: cue = .finish
         default: return
         }
-        if preferences.soundEnabled, engine.isRunning, buffers.count == Cue.allCases.count, voices.count == 4 {
+        if preferences.soundEnabled, engine.isRunning, buffers.count == Stem.allCases.count + Cue.allCases.count, voices.count == 4 {
             let node = voices[voiceIndex]
             voiceIndex = (voiceIndex + 1) % voices.count
             node.stop()
             node.volume = cue == .hit ? 0.28 : 0.36
-            node.scheduleBuffer(buffers[cue.rawValue], at: nil, options: [], completionHandler: nil)
+            node.scheduleBuffer(buffers[Stem.allCases.count + cue.rawValue], at: nil, options: [], completionHandler: nil)
             node.play()
         }
         guard preferences.hapticsEnabled else { return }
@@ -222,7 +285,7 @@ final class ArcadeAudio: NSObject {
     func endRun() {
         generation &+= 1
         running = false
-        bed.stop()
+        stopMusic()
         finishTask?.cancel()
         finishTail = preferences.soundEnabled && engine.isRunning && sessionState == .active
             && sessionOperation == nil && !interruptionActive
@@ -250,8 +313,15 @@ final class ArcadeAudio: NSObject {
         reconcileSession()
     }
 
+    private func stopMusic() {
+        radio?.pause()
+        music.forEach { $0.stop() }
+        lastMusicMixTime = nil
+        musicEnergy = 0
+    }
+
     private func silenceGraph() {
-        bed.stop()
+        stopMusic()
         voices.forEach { $0.stop() }
         engine.pause()
     }
@@ -295,34 +365,79 @@ final class ArcadeAudio: NSObject {
     }
 
     nonisolated private static func synthesize() -> [[Float]] {
+        // Original four-bar D minor racing loop. At 144 BPM / 48 kHz, every
+        // sixteenth is exactly 5,000 frames; all three loops are sample-aligned.
         let sampleRate = 48_000.0
-        let notes = [146.832, 220.0, 261.626, 293.665, 349.228, 293.665, 220.0, 174.614]
-        let frequencies = [0.0, 280, 440, 880, 330, 92, 523.251]
-        return (0..<7).map { cue in
-            let duration = cue == 0 ? 4.0 : (cue == 6 ? 0.7 : 0.24)
-            let count = Int(sampleRate * duration)
-            return (0..<count).map { index in
-                let t = Double(index) / sampleRate
-                let value: Double
-                if cue == 0 {
-                    // An original eight-note D-minor pentatonic phrase over a soft D/A drone.
-                    let beat = Int(t * 2) % notes.count
-                    let local = t.truncatingRemainder(dividingBy: 0.5)
-                    let attack = min(1, local / 0.006)
-                    let pluck = sin(2 * .pi * notes[beat] * t) * attack * exp(-local * 10) * 0.15
-                    let drone = sin(2 * .pi * 55 * t) * 0.12 + sin(2 * .pi * 110 * t) * 0.05
-                    value = drone + pluck
-                } else {
-                    let f = frequencies[cue]
-                    let sweep = cue == 1 || cue == 4 ? 480.0 : (cue == 5 ? -80.0 : 0)
-                    let attack = min(1, t / 0.008)
-                    let decay = pow(max(0, 1 - t / duration), 2)
-                    let fundamental = sin(2 * .pi * (f * t + sweep * t * t))
-                    let overtone = sin(2 * .pi * f * 1.5 * t) * (cue == 5 ? 0.55 : 0.18)
-                    value = (fundamental + overtone) * attack * decay * 0.5
-                }
-                return Float(value)
+        let framesPerStep = 5_000
+        let steps = 64
+        let loopFrames = steps * framesPerStep
+        var pulse = [Float](repeating: 0, count: loopFrames)
+        var drive = pulse
+        var air = pulse
+        let harmony = [38, 34, 36, 33] // D, B-flat, C, A
+        let arp: [[Int]] = [[62, 69, 65, 72], [58, 65, 62, 69],
+                            [60, 67, 64, 70], [57, 64, 60, 67]]
+        let riff = [0, -1, 0, 12, 0, -1, 7, -1, 0, 12, -1, 0, 0, -1, 7, 12]
+        var random: UInt32 = 0x8b251121
+
+        func wave(_ cycles: Double) -> Double { sin(2 * .pi * cycles) }
+        func frequency(_ midi: Int) -> Double { 440 * pow(2, Double(midi - 69) / 12) }
+        func envelope(_ time: Double, end: Double, attack: Double, release: Double) -> Double {
+            min(1, min(time / attack, max(0, (end - time) / release)))
+        }
+
+        for step in 0..<steps {
+            let bar = step / 16
+            let inBar = step % 16
+            let bass = riff[inBar]
+            let bassFrequency = bass >= 0 ? frequency(harmony[bar] + bass) : 0
+            let topFrequency = frequency(arp[bar][(inBar / 2 + inBar % 2) % 4])
+            for frame in 0..<framesPerStep {
+                let index = step * framesPerStep + frame
+                let t = Double(frame) / sampleRate
+                let length = Double(framesPerStep - 1) / sampleRate
+                let gate = envelope(t, end: length, attack: 0.004, release: 0.012)
+                // A swept kick and a syncopated bass, with bounded harmonics.
+                let kickPhase = 46 * t + 87 * (1 - exp(-t * 52)) / 52
+                let kick = inBar % 4 == 0 ? 0.34 * wave(kickPhase) * exp(-28 * t) : 0
+                let b = bassFrequency * t
+                let bassTone = bass >= 0 ? (wave(b) + 0.31 * wave(2 * b) + 0.15 * wave(3 * b))
+                    * 0.15 * exp(-9 * t) : 0
+                pulse[index] = Float(gate * (kick + bassTone))
+
+                // Deterministic noise for claps and offbeat hats; never a sampled loop.
+                random = random &* 1_664_525 &+ 1_013_904_223
+                let noise = Double(random >> 8) / 8_388_608 - 1
+                let clap = inBar % 8 == 4 ? (noise * 0.17 + 0.07 * wave(177 * t))
+                    * exp(-35 * t) : 0
+                let openHat = inBar % 4 == 2
+                let hatLevel = openHat ? 0.16 : (inBar % 2 == 1 ? 0.075 : 0)
+                let hat = noise * wave(8_200 * t) * hatLevel * exp((openHat ? -43 : -92) * t)
+                drive[index] = Float(gate * (clap + hat))
+
+                // Glassy upper line fades in only at speed. Accent the offbeat instead
+                // of layering another sound on top of every kick.
+                let p = topFrequency * t
+                let lead = wave(p + 0.17 * wave(2 * p)) + 0.22 * wave(3 * p)
+                let accent = inBar % 4 == 2 ? 0.25 : (inBar % 2 == 1 ? 0.14 : 0)
+                air[index] = Float(gate * lead * accent * exp(-19 * t))
             }
         }
+
+        let frequencies = [280.0, 440, 880, 330, 92, 523.251]
+        let cues = frequencies.enumerated().map { index, f in
+            let duration = index == 5 ? 0.7 : 0.24
+            let count = Int(sampleRate * duration)
+            return (0..<count).map { frame -> Float in
+                let t = Double(frame) / sampleRate
+                let sweep = index == 0 || index == 3 ? 480.0 : (index == 4 ? -80.0 : 0)
+                let attack = min(1, t / 0.008)
+                let decay = pow(max(0, 1 - t / duration), 2)
+                let fundamental = wave(f * t + sweep * t * t)
+                let overtone = wave(f * 1.5 * t) * (index == 4 ? 0.55 : 0.18)
+                return Float((fundamental + overtone) * attack * decay * 0.5)
+            }
+        }
+        return [pulse, drive, air] + cues
     }
 }
