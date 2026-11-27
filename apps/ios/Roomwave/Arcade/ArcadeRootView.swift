@@ -369,9 +369,10 @@ struct ArcadeRootView: View {
 
     private func brand(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("TWITTER SURFER").font(.system(size: compact ? 23 : 31, weight: .black)).tracking(2)
+            Text("xsurf").font(.system(size: compact ? 23 : 31, weight: .black)).tracking(2)
+                .foregroundStyle(LinearGradient(colors: [.white, teal], startPoint: .topLeading, endPoint: .bottomTrailing))
                 .minimumScaleFactor(0.6).lineLimit(1)
-            Text("YOUR SPACE. THE SOCIAL CURRENT.").font(.system(size: 10, weight: .medium)).foregroundStyle(teal)
+            Text("RIDE THE SOCIAL CURRENT.").font(.system(size: 10, weight: .medium)).foregroundStyle(teal)
         }.accessibilityElement(children: .combine)
     }
 

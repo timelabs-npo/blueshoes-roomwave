@@ -104,7 +104,7 @@ private struct ArcadeResultCard: View {
             }.stroke(teal.opacity(0.20), lineWidth: 44)
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("TWITTER SURFER").font(.system(size: 33, weight: .black, design: .rounded)).tracking(4)
+                    Text("xsurf").font(.system(size: 33, weight: .black, design: .rounded)).tracking(4)
                     Text("RIDE THE CURRENT").font(.system(size: 12, weight: .medium)).foregroundStyle(teal)
                 }
                 Spacer()
