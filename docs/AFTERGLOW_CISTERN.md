@@ -16,3 +16,5 @@ Compare three result outcomes: skipped the Crown, caught it and missed the landi
 
 - Run 45983717863 (`8711bf1`): 18 Swift core tests passed; simulator UI timed out in the optional Creator → Settings transition before any ride. Native readiness failed and no signed upload occurred. It did not retest the previous run's missing independent Results snapshot.
 - Revised real-touch script runs Play → Pause → Result → Retry before optional character, creator and X sheet coverage. Those checks remain required, and the independent RealityKit verifier is unchanged. Results capture now reports a bounded diagnostic reason only if the candidate frame is stale, empty or rejected by the same validation.
+
+- Run 45987856503 (`723c3e0`): real-touch test passes and a clean arch crossing reaches the Safe Line result in 31.2 in-game seconds, 1,680 points. Retry works. Two Results ARView frames were rejected by the pixel verifier; the XCTest UI screenshot is not a substitute. Afterglow's frozen finish now frames the actual traveled path rather than pointing beyond its end; verify visual composition and the same strict capture on the next run.
