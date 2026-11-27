@@ -26,6 +26,8 @@ final class ArcadeFlowUITests: XCTestCase {
         attach(app, "03-home-black-current")
         next.tap()
         waitForEnabled(play)
+        XCTAssertTrue(app.staticTexts["AFTERGLOW CISTERN"].waitForExistence(timeout: 5))
+        attach(app, "03b-home-afterglow-cistern")
 
         let character = app.buttons["arcade.crews"]
         character.tap()
@@ -86,7 +88,9 @@ final class ArcadeFlowUITests: XCTestCase {
         // still reach the real crash/finish result rather than an endless state.
         let retry = app.buttons["arcade.retry"]
         XCTAssertTrue(retry.waitForExistence(timeout: 165), "A real run must end with a result")
-        Thread.sleep(forTimeInterval: 1)
+        // The native evidence probe takes its own asynchronous RealityKit frame.
+        // Leave this genuine result visible through its bounded retry window.
+        Thread.sleep(forTimeInterval: 5)
         XCTAssertTrue(app.staticTexts["arcade.run-credits"].exists,
                       "A completed or failed run must expose credits without a modal")
         XCTAssertTrue(app.buttons["arcade.share-x"].exists,

@@ -316,8 +316,8 @@ struct ArcadeRootView: View {
                 .accessibilityFocused($resultTitleFocused)
                 .onAppear { resultTitleFocused = true }
                 .onDisappear { resultTitleFocused = false }
-            if result.completed && session.selectedID == SurfAfterglow.id {
-                Text(session.afterglowEarned ? "THE DUST BOWS" : "SAFE LINE · NEXT RUN, TRY THE CROWN")
+            if let cue = session.afterglowFinishCue {
+                Text(cue)
                     .font(.headline.weight(.heavy))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(session.afterglowEarned ? Color(red: 1, green: 0.55, blue: 0.84) : gold)

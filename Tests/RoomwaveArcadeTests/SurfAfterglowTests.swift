@@ -20,6 +20,7 @@ final class SurfAfterglowTests: XCTestCase {
         XCTAssertGreaterThan(Double(s.tick) / 60, 26)
         XCTAssertLessThan(Double(s.tick) / 60, 40)
         XCTAssertEqual(s.rings, 0)
+        XCTAssertFalse(finale.caughtCrown)
     }
 
     func testTimedJumpEarnsCrownAndFinishesExactlyOnce() throws {
@@ -56,6 +57,8 @@ final class SurfAfterglowTests: XCTestCase {
         XCTAssertFalse(finale.observe(courseID: SurfAfterglow.id, previous: s(d + 0.1), step: clean))
         XCTAssertFalse(finale.observe(courseID: SurfAfterglow.id, previous: s(d - 0.2), step: ring))
         XCTAssertFalse(finale.observe(courseID: SurfAfterglow.id, previous: s(d + 0.1), step: rough))
+        XCTAssertTrue(finale.caughtCrown)
+        XCTAssertFalse(finale.earned)
         XCTAssertFalse(finale.observe(courseID: SurfAfterglow.id, previous: s(d + 20), step: clean))
         XCTAssertFalse(finale.observe(courseID: SurfAfterglow.id, previous: s(d - 0.2), step: ring))
         XCTAssertTrue(finale.observe(courseID: SurfAfterglow.id, previous: s(d + 0.1), step: clean))

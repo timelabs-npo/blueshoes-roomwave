@@ -46,6 +46,12 @@ final class ArcadeSession: ObservableObject {
     private var calloutID = 0
     private var afterglow = SurfAfterglow.Finale()
     var afterglowEarned: Bool { selectedID == SurfAfterglow.id && afterglow.earned }
+    var afterglowFinishCue: String? {
+        guard selectedID == SurfAfterglow.id, result?.completed == true else { return nil }
+        if afterglow.earned { return "THE DUST BOWS" }
+        if afterglow.caughtCrown { return "CROWN CAUGHT · LAND CLEAN" }
+        return "SAFE LINE · TRY THE CROWN"
+    }
 
     var reducedMotion: Bool { preferences.reducedMotion || systemReducedMotion }
     var availableCourseIDs: [String] {
@@ -435,6 +441,17 @@ final class ArcadeSession: ObservableObject {
         screen = .results
         publishHUD(now: CACurrentMediaTime())
         observeEvidence()
+        #if DEBUG
+        // Results has no display link to retry a rejected asynchronous frame.
+        // Re-observe only this exact state after the compositor has settled.
+        for delay in [0.75, 2.0, 3.25] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.screen == .results, self.isActive,
+                      self.state == final, self.course?.definition.id == course.definition.id else { return }
+                self.observeEvidence()
+            }
+        }
+        #endif
     }
 
     private func observeEvidence(events: [SurfEvent] = []) {

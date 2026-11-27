@@ -36,6 +36,7 @@ public enum SurfAfterglow {
     /// Never touches score, event identity, persisted results, or sharing eligibility.
     public struct Finale: Equatable, Sendable {
         private var crownArmed = false
+        public private(set) var caughtCrown = false
         public private(set) var earned = false
         public init() {}
 
@@ -51,6 +52,7 @@ public enum SurfAfterglow {
             if previous.distance < distance, step.state.distance >= distance,
                step.events.contains(where: { $0.kind == .ring }) {
                 crownArmed = true
+                caughtCrown = true
             }
             guard crownArmed else { return false }
             guard step.state.distance <= distance + SurfAfterglow.landingWindow else {
