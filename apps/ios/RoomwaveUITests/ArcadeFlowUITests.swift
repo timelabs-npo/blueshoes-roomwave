@@ -27,10 +27,29 @@ final class ArcadeFlowUITests: XCTestCase {
         next.tap()
         waitForEnabled(play)
 
+        let character = app.buttons["arcade.crews"]
+        character.tap()
+        let basalt = app.buttons["arcade.role.basalt-guard"]
+        XCTAssertTrue(basalt.waitForExistence(timeout: 5))
+        basalt.tap()
+        XCTAssertTrue(app.staticTexts["arcade.role-title"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["arcade.role-title"].label, "Basalt Guard")
+        app.buttons["Done"].tap()
+        XCTAssertEqual(character.value as? String, "Basalt Guard")
+        character.tap()
+        XCTAssertTrue(basalt.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["arcade.role-title"].label, "Basalt Guard")
+        app.buttons["arcade.role.dune-runners"].tap()
+        app.buttons["Done"].tap()
+        XCTAssertEqual(character.value as? String, "Dune Runners")
+
+        let settings = app.buttons["arcade.settings"]
+        settings.tap()
         app.buttons["arcade.creator"].tap()
         XCTAssertTrue(app.buttons["creator.photo"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
         XCTAssertTrue(play.waitForExistence(timeout: 5))
+        settings.tap()
         app.buttons["arcade.x-currents"].tap()
         XCTAssertTrue(app.segmentedControls["x.source"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["x.ride"].exists, "No activity course may be invented before a real read")
@@ -70,6 +89,8 @@ final class ArcadeFlowUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         XCTAssertTrue(app.staticTexts["arcade.run-credits"].exists,
                       "A completed or failed run must expose credits without a modal")
+        XCTAssertTrue(app.buttons["arcade.share-x"].exists,
+                      "A real result must offer an editable X draft without publishing")
         attach(app, "07-result")
         retry.tap()
         XCTAssertTrue(app.buttons["arcade.pause"].waitForExistence(timeout: 5))

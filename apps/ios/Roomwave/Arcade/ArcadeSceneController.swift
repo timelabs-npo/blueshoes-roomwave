@@ -31,6 +31,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
     private var course: CompiledSurfCourse?
     private var art: ArcadeGeometry.CourseArt?
     private var avatar: LayeredAvatarController?
+    private var crew: CrewRole = .duneRunners
     // Translation/heading live on avatar.root. This wrapper changes only local pose
     // above the imported rig; it doesn't reparent any USDZ layer or skeleton binding.
     private var riderPose: Entity?
@@ -73,6 +74,19 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         arView.accessibilityLabel = "Roomwave surfing course"
     }
 
+    func setCrew(_ selection: CrewRole) {
+        guard crew != selection else { return }
+        crew = selection
+        if let avatar, let art { applyCrewColors(to: avatar, art: art) }
+    }
+
+    private func applyCrewColors(to avatar: LayeredAvatarController, art: ArcadeGeometry.CourseArt) {
+        let palette = art.palette
+        let accent = crew == .duneRunners ? nil : crew.coatAccent
+        avatar.tintArcadeCoat(cloth: palette.riderCloth, panel: palette.riderPanel,
+                            trim: accent ?? palette.riderTrim, badge: accent ?? palette.riderBadge)
+    }
+
     func load(course: CompiledSurfCourse) async throws {
         teardown()
         let revision = generation
@@ -92,9 +106,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
                   let coat = candidateAvatar.root.findEntity(named: "Coat"), containsModel(coat) else {
                 throw ArcadeSceneError.avatarUnavailable(candidateAvatar.assetStatus)
             }
-            let palette = candidateArt.palette
-            candidateAvatar.tintArcadeCoat(cloth: palette.riderCloth, panel: palette.riderPanel,
-                                          trim: palette.riderTrim, badge: palette.riderBadge)
+            applyCrewColors(to: candidateAvatar, art: candidateArt)
             let candidateAnchor = AnchorEntity(world: .zero)
             candidateAnchor.name = "RoomwaveSurfWorld"
             candidateAnchor.addChild(candidateArt.root)

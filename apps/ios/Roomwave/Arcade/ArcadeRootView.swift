@@ -7,14 +7,20 @@ struct ArcadeRootView: View {
     @ObservedObject var session: ArcadeSession
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var systemReducedMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.openURL) private var openURL
-    @State private var codexPresented = false
+    @State private var characterPresented = false
+    @AppStorage(CrewRole.storageKey) private var selectedCrew = CrewRole.duneRunners
     @State private var settingsPresented = false
     @State private var creatorPresented = false
     @State private var socialPresented = false
     @StateObject private var social = XActivityClient()
     @State private var sharePayload: ArcadeSharePayload?
     @State private var shareError: String?
+    @State private var draftToCopy: String?
+    @State private var requestedExtra: Extra?
+    @AccessibilityFocusState(for: .voiceOver) private var resultTitleFocused: Bool
+    private enum Extra { case creator, xCurrents }
     private let ink = Color(red: 0.025, green: 0.04, blue: 0.08)
     private let teal = Color(red: 0.30, green: 0.96, blue: 0.85)
     private let gold = Color(red: 1, green: 0.79, blue: 0.40)
@@ -65,6 +71,7 @@ struct ArcadeRootView: View {
         .task {
             session.setActive(scenePhase == .active)
             session.setSystemReducedMotion(systemReducedMotion)
+            session.scene.setCrew(selectedCrew)
             await session.bootstrap()
         }
         .onOpenURL { if $0.scheme?.lowercased() == "roomwave" { session.handle(url: $0) } }
@@ -73,8 +80,9 @@ struct ArcadeRootView: View {
         }
         .onChange(of: systemReducedMotion) { _, value in session.setSystemReducedMotion(value) }
         .onDisappear { session.pause() }
-        .sheet(isPresented: $codexPresented) { ArcadeRoleCodex() }
-        .sheet(isPresented: $settingsPresented) { settings }
+        .onChange(of: selectedCrew) { _, role in session.scene.setCrew(role) }
+        .sheet(isPresented: $characterPresented) { ArcadeRoleCodex(selected: $selectedCrew) }
+        .sheet(isPresented: $settingsPresented, onDismiss: showRequestedExtra) { settings }
         .sheet(isPresented: $creatorPresented, onDismiss: { session.setActive(scenePhase == .active) }) {
             ArcadeCreatorView { session.useInspiredCourse($0) }
         }
@@ -87,7 +95,17 @@ struct ArcadeRootView: View {
         .sheet(item: $sharePayload) { ArcadeShareSheet(payload: $0) }
         .alert("Could not share", isPresented: Binding(get: { shareError != nil },
             set: { if !$0 { shareError = nil } })) {
-            Button("OK", role: .cancel) { shareError = nil }
+            if let draft = draftToCopy {
+                Button("Copy post text") {
+                    UIPasteboard.general.string = draft
+                    draftToCopy = nil
+                    shareError = nil
+                }
+            }
+            Button("OK", role: .cancel) {
+                draftToCopy = nil
+                shareError = nil
+            }
         } message: { Text(shareError ?? "") }
     }
 
@@ -96,11 +114,6 @@ struct ArcadeRootView: View {
             HStack(alignment: .top) {
                 brand(compact: compact)
                 Spacer()
-                Button { codexPresented = true } label: {
-                    Image(systemName: "person.3.sequence.fill").font(.title3)
-                        .frame(width: 48, height: 48)
-                }.accessibilityLabel("Crews")
-                    .accessibilityIdentifier("arcade.crews")
                 Button { settingsPresented = true } label: {
                     Image(systemName: "slider.horizontal.3").font(.title3)
                         .frame(width: 48, height: 48)
@@ -135,24 +148,22 @@ struct ArcadeRootView: View {
             primary("PLAY", symbol: "play.fill") { session.play() }
                 .accessibilityIdentifier("arcade.play")
                 .disabled(session.isLoading || session.course == nil)
-            Button {
-                session.setActive(false)
-                creatorPresented = true
-            } label: {
-                Label("Create a current", systemImage: "sparkles.rectangle.stack")
-                    .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+            Button { characterPresented = true } label: {
+                VStack(spacing: 2) {
+                    Label {
+                        Text("Character")
+                    } icon: {
+                        Image("xsurf-character-glyph").renderingMode(.template).resizable()
+                            .scaledToFit().frame(width: 20, height: 20)
+                    }
+                        .font(.subheadline.weight(.semibold))
+                    Text(selectedCrew.title).font(.caption).foregroundStyle(selectedCrew.accent)
+                }.frame(minHeight: 44)
             }
-            .accessibilityIdentifier("arcade.creator")
-            .disabled(session.isLoading)
-            Button {
-                session.setActive(false)
-                socialPresented = true
-            } label: {
-                Label("Personal & community currents", systemImage: "waveform.path")
-                    .font(.subheadline.weight(.medium)).frame(minHeight: 44)
-            }
-            .accessibilityIdentifier("arcade.x-currents")
-            .disabled(session.isLoading)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Character")
+            .accessibilityValue(selectedCrew.title)
+            .accessibilityIdentifier("arcade.crews")
             if !compact {
                 Text("HOLD TO CHARGE  ·  RELEASE TO SOAR")
                     .font(.system(size: 10, weight: .semibold)).tracking(1.5).foregroundStyle(.white.opacity(0.72))
@@ -253,7 +264,7 @@ struct ArcadeRootView: View {
                     .accessibilityHidden(true)
                 ScrollView {
                     VStack(spacing: compact ? 12 : 20) {
-                        if compact {
+                        if compact && !typeSize.isAccessibilitySize {
                             HStack(spacing: 30) {
                                 resultSummary(result, compact: true)
                                 resultActions(result)
@@ -282,6 +293,10 @@ struct ArcadeRootView: View {
                  destination: URL(string: "https://quaternius.com/packs/universalbasecharacters.html")!)
                 .foregroundStyle(teal)
                 .frame(minHeight: 44)
+            Link("Tabler Icons · Paweł Kuna · MIT",
+                 destination: URL(string: "https://github.com/tabler/tabler-icons")!)
+                .foregroundStyle(teal)
+                .frame(minHeight: 44)
         }
         .font(.caption)
         .foregroundStyle(.white.opacity(0.84))
@@ -292,6 +307,10 @@ struct ArcadeRootView: View {
         VStack(spacing: compact ? 10 : 18) {
             Text(result.completed ? "LINE COMPLETE" : "RUN ENDED")
                 .font(.system(size: compact ? 12 : 16, weight: .bold)).tracking(2).foregroundStyle(teal)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($resultTitleFocused)
+                .onAppear { resultTitleFocused = true }
+                .onDisappear { resultTitleFocused = false }
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(result.score.formatted()).font(.system(size: compact ? 48 : 68, weight: .bold))
                     .monospacedDigit().minimumScaleFactor(0.5).lineLimit(1)
@@ -322,18 +341,57 @@ struct ArcadeRootView: View {
                 .foregroundStyle(.white.opacity(0.7))
             primary("RETRY", symbol: "arrow.clockwise") { session.play() }
                 .accessibilityIdentifier("arcade.retry")
-            HStack(spacing: 24) {
-                secondary("Courses", symbol: "water.waves") { session.home() }
-                secondary("Share run", symbol: "square.and.arrow.up") {
-                    do { sharePayload = try ArcadeSharing.make(result: result, title: session.title) }
-                    catch { shareError = error.localizedDescription }
+            Button {
+                draftToCopy = nil
+                guard let url = ArcadeSharing.xComposer(result: result) else {
+                    shareError = "Could not create an X draft. You can still use More sharing options."
+                    return
                 }
+                openURL(url) { accepted in
+                    if !accepted {
+                        draftToCopy = ArcadeSharing.xDraft(result: result)
+                        shareError = "Could not open X. Copy the post text or use More sharing options."
+                    }
+                }
+            } label: {
+                Label {
+                    Text("Share on X")
+                } icon: {
+                    Image("xsurf-share-glyph").renderingMode(.template).resizable()
+                        .scaledToFit().frame(width: 20, height: 20)
+                }
+                    .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
+                    .padding(.horizontal, 14)
+                    .background(ink.opacity(0.72), in: Capsule())
+                    .overlay { Capsule().stroke(teal.opacity(0.7), lineWidth: 1) }
             }
-            Button("Open X composer") {
-                if let url = ArcadeSharing.xComposer(result: result) { openURL(url) }
+            .buttonStyle(.plain).frame(maxWidth: 360)
+            .accessibilityIdentifier("arcade.share-x")
+            .accessibilityHint("Opens an editable post. Nothing is published automatically.")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) { courseAndShareActions(result) }
+                VStack(spacing: 0) { courseAndShareActions(result) }
             }
-            .font(.footnote).foregroundStyle(.white.opacity(0.75)).frame(minHeight: 44)
-            .accessibilityHint("Opens your editable post. You choose whether to publish it.")
+        }
+    }
+
+    @ViewBuilder
+    private func courseAndShareActions(_ result: SurfRunResult) -> some View {
+        secondary("Courses", symbol: "water.waves") { session.home() }
+        secondary("More sharing options", symbol: "ellipsis") {
+            draftToCopy = nil
+            do { sharePayload = try ArcadeSharing.make(result: result, title: session.title) }
+            catch { shareError = error.localizedDescription }
+        }
+    }
+
+    private func showRequestedExtra() {
+        guard let extra = requestedExtra else { return }
+        requestedExtra = nil
+        session.setActive(false)
+        switch extra {
+        case .creator: creatorPresented = true
+        case .xCurrents: socialPresented = true
         }
     }
 
@@ -346,13 +404,27 @@ struct ArcadeRootView: View {
                 if systemReducedMotion {
                     Text("System Reduce Motion is enabled.").font(.footnote).foregroundStyle(.secondary)
                 }
+                Section("Explore") {
+                    Button {
+                        requestedExtra = .creator
+                        settingsPresented = false
+                    } label: {
+                        Label("Create a current", systemImage: "sparkles.rectangle.stack")
+                    }.accessibilityIdentifier("arcade.creator")
+                    Button {
+                        requestedExtra = .xCurrents
+                        settingsPresented = false
+                    } label: {
+                        Label("X currents", systemImage: "waveform.path")
+                    }.accessibilityIdentifier("arcade.x-currents")
+                }
                 Text("Your progress and last replay stay in this app’s private storage. Sharing sends only the score card, run facts and a course link you choose to share.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Link("Privacy policy", destination: URL(string: "https://github.com/timelabs-npo/blueshoes-roomwave/blob/main/docs/PRIVACY.md")!)
             }
             .navigationTitle("Preferences").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { settingsPresented = false } } }
-        }.presentationDetents([.medium, .large]).preferredColorScheme(.dark)
+        }.presentationDetents([.large]).preferredColorScheme(.dark)
     }
 
     private func preference(_ keyPath: WritableKeyPath<ArcadePreferences, Bool>) -> Binding<Bool> {

@@ -1,17 +1,18 @@
 import SwiftUI
+import UIKit
 
 struct ArcadeRoleCodex: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
-    @State private var selected: CrewRole = .duneRunners
+    @Binding var selected: CrewRole
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("Four ways to ride")
+                    Text("Choose your crew")
                         .font(.system(.largeTitle, design: .rounded, weight: .black))
-                    Text("Crew concepts. Abilities shown here are not active in races.")
+                    Text("Changes your rider outfit. Every crew races by the same rules.")
                         .font(.subheadline).foregroundStyle(.secondary)
                     HStack(spacing: 6) {
                         ForEach(CrewRole.allCases) { role in
@@ -36,7 +37,7 @@ struct ArcadeRoleCodex: View {
                 }.padding()
             }
             .background(Color(red: 0.04, green: 0.05, blue: 0.10))
-            .navigationTitle("Crews")
+            .navigationTitle("Character")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
@@ -55,12 +56,13 @@ struct ArcadeRoleCodex: View {
             Text(role.title).font(.title2.weight(.heavy)).foregroundStyle(role.accent)
                 .accessibilityIdentifier("arcade.role-title")
             Text(role.pitch).font(.body)
-            Text(role.ability).font(.callout.weight(.semibold)).foregroundStyle(role.accent)
         }
     }
 }
 
-private enum CrewRole: String, Identifiable, CaseIterable {
+enum CrewRole: String, Identifiable, CaseIterable {
+    static let storageKey = "xs.rider.crew"
+
     case duneRunners = "dune-runners"
     case basaltGuard = "basalt-guard"
     case vectorOracles = "vector-oracles"
@@ -83,28 +85,23 @@ private enum CrewRole: String, Identifiable, CaseIterable {
         case .echoWeavers: "waveform.path"
         }
     }
-    var accent: Color {
+    var accent: Color { Color(uiColor: coatAccent) }
+
+    var coatAccent: UIColor {
         switch self {
-        case .duneRunners: Color(red: 1, green: 0.67, blue: 0.40)
-        case .basaltGuard: Color(red: 1, green: 0.42, blue: 0.54)
-        case .vectorOracles: Color(red: 0.48, green: 1, blue: 0.88)
-        case .echoWeavers: Color(red: 0.88, green: 0.59, blue: 1)
+        case .duneRunners: UIColor(red: 1, green: 0.67, blue: 0.40, alpha: 1)
+        case .basaltGuard: UIColor(red: 1, green: 0.42, blue: 0.54, alpha: 1)
+        case .vectorOracles: UIColor(red: 0.48, green: 1, blue: 0.88, alpha: 1)
+        case .echoWeavers: UIColor(red: 0.88, green: 0.59, blue: 1, alpha: 1)
         }
     }
+
     var pitch: String {
         switch self {
         case .duneRunners: "Sand navigators who find speed where the surface gives way."
         case .basaltGuard: "Heavy outriders who keep their line when everyone else breaks."
         case .vectorOracles: "Plotters who read the shape of the next gate before it comes into view."
         case .echoWeavers: "Rig modders who trade a favorite trick for a second chance."
-        }
-    }
-    var ability: String {
-        switch self {
-        case .duneRunners: "Slipstream · one sustained burst after a clean landing."
-        case .basaltGuard: "Brace · absorb one collision, at a speed cost."
-        case .vectorOracles: "Foresight · read the next two gates in advance."
-        case .echoWeavers: "Rewire · swap one optional perk before the race."
         }
     }
 }
