@@ -52,6 +52,8 @@ final class ArcadeSceneController: ArcadeSceneDriving {
     private var riderHeading = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
     private var fieldOfView: Float = 61
     private var landingCompression: Float = 0
+    private var displayedCompression: Float = 0
+    private var displayedTuck: Float = 0
     private var hitImpulse: Float = 0
     private var eventAge: Float = 0
     private var wasPreview = true
@@ -90,6 +92,9 @@ final class ArcadeSceneController: ArcadeSceneDriving {
                   let coat = candidateAvatar.root.findEntity(named: "Coat"), containsModel(coat) else {
                 throw ArcadeSceneError.avatarUnavailable(candidateAvatar.assetStatus)
             }
+            let palette = candidateArt.palette
+            candidateAvatar.tintArcadeCoat(cloth: palette.riderCloth, panel: palette.riderPanel,
+                                          trim: palette.riderTrim, badge: palette.riderBadge)
             let candidateAnchor = AnchorEntity(world: .zero)
             candidateAnchor.name = "RoomwaveSurfWorld"
             candidateAnchor.addChild(candidateArt.root)
@@ -193,7 +198,7 @@ final class ArcadeSceneController: ArcadeSceneDriving {
             newestEventTick = max(newestEventTick, event.tick)
             switch event.kind {
             case .landing, .perfectLanding:
-                landingCompression = max(landingCompression, event.kind == .perfectLanding ? 0.17 : 0.24)
+                landingCompression = max(landingCompression, event.kind == .perfectLanding ? 0.25 : 0.33)
             case .hit:
                 hitImpulse = min(1, Float(max(0, event.intensity)))
                 eventAge = 0
@@ -201,12 +206,24 @@ final class ArcadeSceneController: ArcadeSceneDriving {
             }
         }
         lastEventTick = newestEventTick
-        landingCompression *= exp(-13 * dt)
         hitImpulse *= exp(-8 * dt)
-        let charge = state.grounded ? Float(max(0, min(1, state.charge))) : 0
-        let compression = min(0.34, charge * 0.22 + landingCompression)
+        let charge = state.charge.isFinite && state.grounded ? Float(max(0, min(1, state.charge))) : 0
+        let tuckTarget: Float = !state.grounded && state.previousPressed ? 1 : 0
+        // Flight input has a visible nose-down tuck distinct from the grounded
+        // loaded stance. Takeoff itself still comes exclusively from simulation.
+        let tuckTime = smoothing(tuckTarget > displayedTuck ? 24 : 14, dt)
+        displayedTuck = snap ? tuckTarget : displayedTuck + (tuckTarget - displayedTuck) * tuckTime
+        let chargeCurve = charge * charge * (3 - 2 * charge)
+        let compressionAim = state.grounded ? max(chargeCurve * 0.25, landingCompression) : displayedTuck * 0.26
+        let poseSmoothing = smoothing(compressionAim > displayedCompression ? 31 : 10, dt)
+        displayedCompression = snap ? compressionAim : displayedCompression + (compressionAim - displayedCompression) * poseSmoothing
+        landingCompression *= exp(-10 * dt)
+        let compression = min(reducedMotion ? 0.10 : 0.33,
+                              displayedCompression * (reducedMotion ? 0.33 : 1))
         let roadPitch = simd_quatf(angle: Float(atan(pose.slope)), axis: SIMD3<Float>(1, 0, 0))
-        let pitch = state.grounded ? Float(atan(pose.slope)) : Float(max(-0.18, min(0.18, -state.verticalSpeed * 0.013)))
+        let flightPitch = Float(max(-0.16, min(0.16, -state.verticalSpeed * 0.011)))
+        let tuckedPitch = flightPitch - displayedTuck * (reducedMotion ? 0.06 : 0.18)
+        let pitch = state.grounded ? Float(atan(pose.slope)) : tuckedPitch
         let bank = reducedMotion ? Float(0) : max(-0.14, min(0.14, -turn * 0.8))
         let localPose = simd_quatf(angle: pitch, axis: SIMD3(1, 0, 0)) *
             simd_quatf(angle: bank, axis: SIMD3(0, 0, 1))
@@ -307,6 +324,8 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         riderHeading = simd_quatf(angle: 0, axis: SIMD3(0, 1, 0))
         fieldOfView = 61
         landingCompression = 0
+        displayedCompression = 0
+        displayedTuck = 0
         hitImpulse = 0
         eventAge = 0
         wasPreview = true
@@ -414,6 +433,8 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         consumedCursor = 0
         lastEventTick = -1
         landingCompression = 0
+        displayedCompression = 0
+        displayedTuck = 0
         hitImpulse = 0
         cameraPosition = nil
         cameraTarget = nil

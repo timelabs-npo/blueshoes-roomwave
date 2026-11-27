@@ -62,6 +62,17 @@ final class ArcadeSession: ObservableObject {
         }
     }
 
+    /// Read the next upcoming hazard, not decorative effects. The cue is
+    /// text/shape based and appears before the collider at maximum speed.
+    var masteryCue: String? {
+        guard selectedID == "prism-break", screen == .playing,
+              let course, let state,
+              let hazard = course.definition.encounters.dropFirst(state.encounterCursor).prefix(4)
+                  .first(where: { $0.kind == .barrier || $0.kind == .ceiling }),
+              (0...24).contains(hazard.distance - state.distance) else { return nil }
+        return hazard.kind == .ceiling ? "↓  LOW ARCH" : "↑  CLEAR THE BAR"
+    }
+
     var resultExplanation: String? {
         guard result != nil, let state, state.phase == .crashed else { return nil }
         if state.shields == 0 {
@@ -136,7 +147,7 @@ final class ArcadeSession: ObservableObject {
               items.first(where: { $0.name == "rules" })?.value == "3",
               let id = items.first(where: { $0.name == "course" })?.value,
               ArcadeProfile.courseIDs.contains(id) else {
-            statusMessage = "This challenge is not supported. Choose one of the three courses."
+            statusMessage = "This challenge is not supported. Choose a built-in course."
             return
         }
         requestCourse(id)

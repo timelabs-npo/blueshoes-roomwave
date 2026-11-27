@@ -137,6 +137,47 @@ final class SurfGameplayTests: XCTestCase {
         }
     }
 
+    func testPrismBreakCreatesASeparateOptInMasteryRoute() throws {
+        let definition = try XCTUnwrap(SurfCatalog.course(id: "prism-break"))
+        XCTAssertFalse(SurfCatalog.all.contains { $0.id == definition.id })
+        XCTAssertEqual(SurfCatalog.featured.last, definition)
+        let course = try definition.compiled()
+        let lowRings = definition.encounters.filter { $0.kind == .ring && $0.height < 2 }
+        XCTAssertEqual(lowRings.count, 6)
+        XCTAssertTrue(lowRings.allSatisfy { $0.height - $0.halfHeight > 0.5 })
+        XCTAssertLessThan(lowRings.last!.halfHeight, lowRings.first!.halfHeight)
+        for pressed in [false, true] {
+            let idle = try run(course) { _ in pressed }
+            XCTAssertEqual(idle.0.score, 0)
+            XCTAssertNotEqual(idle.0.phase, .finished)
+        }
+        let spam = try run(course) { $0.tick % 30 < 12 }
+        XCTAssertLessThan(spam.0.score, definition.medalScores[0])
+        XCTAssertNotEqual(spam.0.phase, .finished)
+    }
+
+    func testPrismBreakMasterTraceCollectsBothBandsAndReplays() throws {
+        let course = try XCTUnwrap(SurfCatalog.course(id: "prism-break")).compiled()
+        let beds: [Double] = [40, 174, 296, 448, 566, 692, 840, 953, 1074]
+        let roofs: [Double] = [74, 74, 74, 74, 74, 74, 68, 71, 67]
+        // Recorded windows from the independent design model; the test runs the Swift physics.
+        let windows: [[Double]] = [[0,17,0,0],[-4,29,0,0],[8,17,0,0],[16,32,6,4],
+                                   [16,32,6,8],[16,32,12,8],[0,26,6,0],[0,32,6,8],[12,32,12,4]]
+        let played = try run(course) { state in
+            guard let i = beds.lastIndex(where: { state.distance >= $0 - 8 }) else { return false }
+            let x = state.distance - beds[i], w = windows[i]
+            if state.grounded { return x >= w[0] && x < w[1] }
+            return i >= 3 && x >= roofs[i] - w[2] && x < roofs[i] - w[3] && state.verticalSpeed > -22
+        }
+        XCTAssertEqual(played.0.phase, .finished)
+        XCTAssertGreaterThanOrEqual(played.0.rings, 10) // only nine high rings exist
+        XCTAssertGreaterThanOrEqual(played.0.shields, 2)
+        XCTAssertEqual(SurfSimulation.result(state: played.0, course: course).medal, .gold)
+        let replay = SurfReplay(courseID: course.definition.id, seed: course.definition.seed,
+                                rulesVersion: SurfRules.standard.version, inputs: played.1, finalState: played.0)
+        XCTAssertEqual(try SurfSimulation.verify(replay: replay, course: course), played.0)
+    }
+
     func testSweepsEveryEncounterAtMaximumSpeedInOrderAndDoesNotRepeat() throws {
         let course = try flat([
             SurfEncounter(id: 0, kind: .ring, distance: 1, height: 1.5, halfHeight: 0.1),

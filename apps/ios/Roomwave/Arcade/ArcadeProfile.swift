@@ -9,7 +9,7 @@ struct ArcadeBest: Codable {
 /// Small, app-private records. No capture metadata or identifiers enter this store.
 @MainActor
 final class ArcadeProfile {
-    static let courseIDs = ["neon-dawn", "low-orbit", "black-current"]
+    static let courseIDs = SurfCatalog.featured.map(\.id)
     private(set) var preferences = ArcadePreferences()
     private(set) var bests: [String: ArcadeBest] = [:]
     private(set) var notice: String?
