@@ -22,6 +22,7 @@ final class ArcadeEffects {
         var age: Float = 0
         var lifetime: Float = 0
         var radius: Float = 1
+        var stationary = false
     }
 
     private let cyan = UnlitMaterial(color: ArcadeGeometry.cyan)
@@ -56,37 +57,45 @@ final class ArcadeEffects {
     func event(_ event: SurfEvent, rider: SIMD3<Float>, road: SIMD3<Float>,
                forward: SIMD3<Float>, reducedMotion: Bool) {
         let intensity = Float(max(0, min(1.5, event.intensity.isFinite ? event.intensity : 0)))
+        // Reduced motion uses a road-locked marker: no expansion, burst, wake
+        // or screen-space animation. The mark carries the same event color.
+        if reducedMotion {
+            switch event.kind {
+            case .takeoff, .landing, .boost: stationaryMark(at: road, forward: forward, material: cyan)
+            case .perfectLanding, .finish: stationaryMark(at: road, forward: forward, material: white)
+            case .ring: stationaryMark(at: road, forward: forward, material: gold)
+            case .hit: stationaryMark(at: road, forward: forward, material: coral)
+            case .nearMiss, .comboLost: break
+            }
+            return
+        }
         switch event.kind {
         case .takeoff:
             pulse(at: road, forward: forward, radius: 1.2, duration: 0.38, material: cyan)
-            burst(at: rider, forward: forward, count: reducedMotion ? 3 : 9,
+            burst(at: rider, forward: forward, count: 9,
                   speed: 1.8, size: 0.055, material: cyan, upward: 0.7)
         case .landing, .perfectLanding:
             let perfect = event.kind == .perfectLanding
-            pulse(at: road, forward: forward, radius: perfect ? 2.5 : 1.7, duration: reducedMotion ? 0.3 : 0.5,
+            pulse(at: road, forward: forward, radius: perfect ? 2.5 : 1.7, duration: 0.5,
                   material: perfect ? white : cyan)
-            if !reducedMotion {
-                burst(at: road, forward: forward, count: perfect ? 12 : 7,
-                      speed: perfect ? 3.6 : 2.2, size: 0.045,
-                      material: perfect ? white : cyan, upward: 0.5)
-            }
+            burst(at: road, forward: forward, count: perfect ? 12 : 7,
+                  speed: perfect ? 3.6 : 2.2, size: 0.045,
+                  material: perfect ? white : cyan, upward: 0.5)
         case .ring:
             // Gold only celebrates collected rings, never damage or a generic speed cue.
             burst(at: rider + SIMD3(0, 0.4, 0), forward: forward,
-                  count: reducedMotion ? 5 : 16, speed: reducedMotion ? 1.2 : 3.3,
+                  count: 16, speed: 3.3,
                   size: 0.075, material: gold, upward: 1.1)
         case .hit:
             burst(at: rider + SIMD3(0, 0.45, 0), forward: forward,
-                  count: reducedMotion ? 3 : 12, speed: 2.6 * intensity,
+                  count: 12, speed: 2.6 * intensity,
                   size: 0.08, material: coral, upward: 0.7)
         case .boost:
-            burst(at: rider, forward: forward, count: reducedMotion ? 3 : 10,
+            burst(at: rider, forward: forward, count: 10,
                   speed: 3, size: 0.06, material: cyan, upward: 0.4)
         case .nearMiss:
-            if !reducedMotion {
-                burst(at: rider, forward: forward, count: 3, speed: 1.3,
-                      size: 0.035, material: white, upward: 0.2)
-            }
+            burst(at: rider, forward: forward, count: 3, speed: 1.3,
+                  size: 0.035, material: white, upward: 0.2)
         case .finish:
             pulse(at: road, forward: forward, radius: 3, duration: 0.65, material: white)
         case .comboLost:
@@ -99,7 +108,7 @@ final class ArcadeEffects {
         for index in sparks.indices where sparks[index].lifetime > 0 {
             sparks[index].age += deltaTime
             let fraction = sparks[index].age / sparks[index].lifetime
-            if fraction >= 1 {
+            if reducedMotion || fraction >= 1 {
                 sparks[index].entity.isEnabled = false
                 sparks[index].lifetime = 0
                 continue
@@ -112,23 +121,31 @@ final class ArcadeEffects {
         for index in waves.indices where waves[index].lifetime > 0 {
             waves[index].age += deltaTime
             let fraction = waves[index].age / waves[index].lifetime
-            if fraction >= 1 {
+            if (reducedMotion && !waves[index].stationary) || fraction >= 1 {
                 waves[index].entity.isEnabled = false
                 waves[index].lifetime = 0
                 continue
             }
-            let radius = 0.3 + waves[index].radius * fraction
-            waves[index].entity.scale = SIMD3(radius, radius, max(0.01, 1 - fraction))
+            let t = min(1, max(0, fraction))
+            let fadeIn = min(1, t * 8)
+            let tail = 1 - t
+            waves[index].entity.components.set(OpacityComponent(opacity: fadeIn * tail * tail))
+            if !waves[index].stationary {
+                // Ease the large first step into the rim's fade to avoid a hard pop.
+                let smooth = t * t * (3 - 2 * t)
+                let radius = 0.3 + waves[index].radius * smooth
+                waves[index].entity.scale = SIMD3(radius, radius, 1)
+            }
         }
         // A wake is emitted only for actual flight. Spatially separated fading marks
         // expose the launch/arc; they don't impose an independent motion on the rider.
-        if airborne, speed > 8 {
+        if !reducedMotion, airborne, speed > 8 {
             trailAccumulator += deltaTime
-            let interval: Float = reducedMotion ? 0.12 : 0.045
+            let interval: Float = 0.045
             if trailAccumulator >= interval {
                 trailAccumulator.formTruncatingRemainder(dividingBy: interval)
                 emit(at: rider - forward * 0.45 + SIMD3(0, 0.03, 0),
-                     velocity: -forward * 1.3, duration: reducedMotion ? 0.22 : 0.42,
+                     velocity: -forward * 1.3, duration: 0.42,
                      size: 0.055, material: cyan, forward: forward)
             }
         } else { trailAccumulator = 0 }
@@ -148,19 +165,27 @@ final class ArcadeEffects {
         waveCursor = 0
     }
 
+    private func stationaryMark(at position: SIMD3<Float>, forward: SIMD3<Float>, material: UnlitMaterial) {
+        pulse(at: position, forward: forward, radius: 1.1, duration: 0.44,
+              material: material, stationary: true)
+    }
+
     private func pulse(at position: SIMD3<Float>, forward: SIMD3<Float>, radius: Float,
-                       duration: Float, material: UnlitMaterial) {
+                       duration: Float, material: UnlitMaterial, stationary: Bool = false) {
         let index = waveCursor
         waveCursor = (waveCursor + 1) % waves.count
         waves[index].age = 0
         waves[index].lifetime = duration
         waves[index].radius = radius
+        waves[index].stationary = stationary
         waves[index].entity.position = position + SIMD3(0, 0.035, 0)
         let slopeAngle = atan2(forward.y, max(0.001, simd_length(SIMD2(forward.x, forward.z))))
         waves[index].entity.orientation = ArcadeGeometry.yaw(for: forward) *
             simd_quatf(angle: slopeAngle - .pi / 2, axis: SIMD3<Float>(1, 0, 0))
         waves[index].entity.model?.materials = [material]
-        waves[index].entity.scale = SIMD3(repeating: 0.3)
+        let initialRadius: Float = stationary ? radius : 0.3
+        waves[index].entity.scale = SIMD3(initialRadius, initialRadius, 1)
+        waves[index].entity.components.set(OpacityComponent(opacity: 0))
         waves[index].entity.isEnabled = true
     }
 

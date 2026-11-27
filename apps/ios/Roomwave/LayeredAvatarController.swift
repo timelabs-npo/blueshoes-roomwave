@@ -178,6 +178,29 @@ final class LayeredAvatarController {
         }
     }
 
+    /// Roomwave's ordinary imported materials are unlit. Style only the exact
+    /// authored coat meshes; preserve the original rig, mesh, depth and eye tint.
+    /// This is opt-in for Arcade and never mutates the underlying USDZ resource.
+    func tintArcadeCoat(cloth: UIColor, panel: UIColor, trim: UIColor, badge: UIColor) {
+        let authoredColors: [String: UIColor] = [
+            "Coat_Jacket": cloth, "Coat_Hood": cloth, "Coat_Tail": cloth,
+            "Coat_Trousers": panel, "Coat_KneePanels": panel, "Coat_BlueBoots": panel,
+            "Coat_Gauntlets": panel, "Coat_BootCuffs": trim, "Coat_Piping_0": trim,
+            "Coat_Piping_1": trim, "Coat_CyanDiamond": badge
+        ]
+        for layer in layers[.coat] ?? [] {
+            for entity in hierarchy(of: layer) {
+                guard let tint = authoredColors[entity.name],
+                      var model = entity.components[ModelComponent.self],
+                      model.materials.count == 1,
+                      var unlit = model.materials.first as? UnlitMaterial else { continue }
+                unlit.color = .init(tint: tint)
+                model.materials = [unlit]
+                entity.components.set(model)
+            }
+        }
+    }
+
     func setLayerVisibility(skeleton: Bool, muscle: Bool, skin: Bool, coat: Bool) {
         visibility = [.skeleton: skeleton, .muscle: muscle, .skin: skin, .coat: coat]
         applyLayerVisibility()

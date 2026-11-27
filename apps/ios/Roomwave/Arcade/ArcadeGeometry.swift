@@ -13,20 +13,30 @@ enum ArcadeGeometry {
         let terrain: UIColor
         let peaks: UIColor
         let horizon: UIColor
+        let riderCloth: UIColor
+        let riderPanel: UIColor
+        let riderTrim: UIColor
+        let riderBadge: UIColor
         static func forBiome(_ biome: SurfBiome) -> Palette {
             switch biome {
             case .dawn:
-                return Palette(sky: rgb(0.035, 0.045, 0.12), road: rgb(0.035, 0.105, 0.16),
-                               terrain: rgb(0.035, 0.31, 0.34), peaks: rgb(0.28, 0.105, 0.39),
-                               horizon: rgb(1, 0.51, 0.38))
+                return Palette(sky: rgb(0.09, 0.043, 0.12), road: rgb(0.127, 0.077, 0.068),
+                               terrain: rgb(0.29, 0.16, 0.10), peaks: rgb(0.38, 0.183, 0.16),
+                               horizon: rgb(1.00, 0.70, 0.43),
+                               riderCloth: rgb(0.85, 0.72, 0.51), riderPanel: rgb(0.62, 0.52, 0.37),
+                               riderTrim: rgb(0.64, 0.96, 0.94), riderBadge: rgb(0.98, 0.77, 0.40))
             case .orbit:
-                return Palette(sky: rgb(0.018, 0.025, 0.09), road: rgb(0.055, 0.075, 0.18),
-                               terrain: rgb(0.12, 0.25, 0.42), peaks: rgb(0.34, 0.18, 0.49),
-                               horizon: rgb(0.37, 0.52, 0.92))
+                return Palette(sky: rgb(0.038, 0.033, 0.104), road: rgb(0.092, 0.078, 0.13),
+                               terrain: rgb(0.19, 0.146, 0.23), peaks: rgb(0.34, 0.22, 0.42),
+                               horizon: rgb(0.68, 0.64, 0.92),
+                               riderCloth: rgb(0.83, 0.76, 0.66), riderPanel: rgb(0.59, 0.53, 0.57),
+                               riderTrim: rgb(0.68, 0.94, 1.00), riderBadge: rgb(1.00, 0.79, 0.52))
             case .midnight:
-                return Palette(sky: rgb(0.008, 0.014, 0.035), road: rgb(0.025, 0.065, 0.095),
-                               terrain: rgb(0.035, 0.12, 0.16), peaks: rgb(0.10, 0.07, 0.20),
-                               horizon: rgb(0.20, 0.34, 0.49))
+                return Palette(sky: rgb(0.02, 0.021, 0.063), road: rgb(0.055, 0.064, 0.096),
+                               terrain: rgb(0.11, 0.138, 0.19), peaks: rgb(0.19, 0.107, 0.28),
+                               horizon: rgb(0.41, 0.57, 0.72),
+                               riderCloth: rgb(0.78, 0.78, 0.67), riderPanel: rgb(0.55, 0.55, 0.56),
+                               riderTrim: rgb(0.68, 1.00, 0.90), riderBadge: rgb(1.00, 0.74, 0.48))
             }
         }
     }
@@ -69,9 +79,10 @@ enum ArcadeGeometry {
         var uvs: [SIMD2<Float>] = []
         var indices: [UInt32] = []
 
-        mutating func triangle(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>) {
+        mutating func triangle(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>,
+                               minimumNormalSquared: Float = 0.0000001) {
             let cross = simd_cross(b - a, c - a)
-            guard simd_length_squared(cross) > 0.0000001 else { return }
+            guard simd_length_squared(cross) > minimumNormalSquared else { return }
             let normal = simd_normalize(cross)
             let start = UInt32(positions.count)
             positions.append(contentsOf: [a, b, c])
@@ -239,65 +250,87 @@ enum ArcadeGeometry {
         }
     }
 
-    private static let foilOutline: [SIMD2<Float>] = [SIMD2(0, -0.675), SIMD2(0.18, -0.48),
-            SIMD2(0.275, 0.12), SIMD2(0.17, 0.59), SIMD2(0, 0.675),
-            SIMD2(-0.17, 0.59), SIMD2(-0.275, 0.12), SIMD2(-0.18, -0.48)]
+    // Roomwave-original hydrofoil. The control cage intentionally stays inside
+    // the signed build's board envelope; the avatar and all collisions are unchanged.
+    private static let foilOutline: [SIMD2<Float>] = {
+        let cage: [SIMD2<Float>] = [
+            SIMD2(0, -0.675), SIMD2(0.18, -0.48),
+            SIMD2(0.275, 0.12), SIMD2(0.17, 0.59),
+            SIMD2(0, 0.675), SIMD2(-0.17, 0.59),
+            SIMD2(-0.275, 0.12), SIMD2(-0.18, -0.48)
+        ]
+        var outline = cage
+        for _ in 0..<2 {
+            let polygon = outline
+            outline = polygon.indices.flatMap { index -> [SIMD2<Float>] in
+                let a = polygon[index]
+                let b = polygon[(index + 1) % polygon.count]
+                return [a * 0.86 + b * 0.14, a * 0.14 + b * 0.86]
+            }
+        }
+        return outline
+    }()
+
     private static func foilTop(_ p: SIMD2<Float>) -> SIMD3<Float> {
-        SIMD3(p.x, 0.0345 + max(0, -p.y - 0.4) * 0.10, p.y)
+        SIMD3(p.x, 0.035 + max(0, -p.y - 0.4) * 0.10, p.y)
     }
 
-    /// Authored eight-point foil: a lifted nose, tapered tail and bevelled hull.
-    /// Its footprint stays within the old 0.55 by 1.35 visual board envelope.
+    /// Three loft rings: lifted deck, bevel highlight and tapered lower hull.
+    /// The 32-section hull is built once and reused by the real rider and ghost.
     static func surfboardHull() throws -> MeshResource {
         let outline = foilOutline
         var mesh = MeshBuilder()
         for index in outline.indices {
             let a = outline[index], b = outline[(index + 1) % outline.count]
             let at = foilTop(a), bt = foilTop(b)
-            let ab = SIMD3<Float>(a.x * 0.79, -0.035, a.y * 0.94)
-            let bb = SIMD3<Float>(b.x * 0.79, -0.035, b.y * 0.94)
+            let am = SIMD3<Float>(a.x * 1.04, at.y - 0.014, a.y * 1.01)
+            let bm = SIMD3<Float>(b.x * 1.04, bt.y - 0.014, b.y * 1.01)
+            let ab = SIMD3<Float>(a.x * 0.78, -0.032, a.y * 0.93)
+            let bb = SIMD3<Float>(b.x * 0.78, -0.032, b.y * 0.93)
             mesh.triangle(SIMD3(0, 0.035, 0), bt, at)
+            mesh.triangle(at, bt, am); mesh.triangle(bt, bm, am)
+            mesh.triangle(am, bm, ab); mesh.triangle(bm, bb, ab)
             mesh.triangle(SIMD3(0, -0.048, 0), ab, bb)
-            mesh.triangle(at, bt, ab); mesh.triangle(bt, bb, ab)
         }
-        return try mesh.resource(named: "TaperedSurfFoil")
+        return try mesh.resource(named: "RoomwaveLoftedHydrofoil")
     }
 
     static func surfboardRim() throws -> MeshResource {
         var mesh = MeshBuilder()
         for index in foilOutline.indices {
             let a = foilTop(foilOutline[index]), b = foilTop(foilOutline[(index + 1) % foilOutline.count])
-            let outerA = SIMD3<Float>(a.x * 1.08, a.y, a.z * 1.03)
-            let outerB = SIMD3<Float>(b.x * 1.08, b.y, b.z * 1.03)
-            mesh.triangle(a, outerB, outerA); mesh.triangle(a, b, outerB)
+            let outerA = SIMD3<Float>(a.x * 1.05, a.y, a.z * 1.017)
+            let outerB = SIMD3<Float>(b.x * 1.05, b.y, b.z * 1.017)
+            // Thin trim needs a smaller cutoff than metre-scale scenery.
+            mesh.triangle(a, outerB, outerA, minimumNormalSquared: 0.0000000001)
+            mesh.triangle(a, b, outerB, minimumNormalSquared: 0.0000000001)
         }
         return try mesh.resource(named: "FoilEnergyRim")
     }
 
     static func surfboardInlay() throws -> MeshResource {
         var mesh = MeshBuilder()
-        func point(_ x: Float, _ z: Float) -> SIMD3<Float> {
-            // Match the authored triangular deck instead of placing a flat decal
-            // through its raised nose. This executes only during asset construction.
-            for index in foilOutline.indices {
-                let a = foilOutline[index], b = foilOutline[(index + 1) % foilOutline.count]
-                let determinant = a.x * b.y - b.x * a.y
-                let wa = (x * b.y - b.x * z) / determinant
-                let wb = (a.x * z - x * a.y) / determinant
-                let wc = 1 - wa - wb
-                if min(wa, wb, wc) >= -0.0001 {
-                    return SIMD3(x, foilTop(a).y * wa + foilTop(b).y * wb + 0.035 * wc + 0.001, z)
-                }
+        // All graphics stay on the flat rear deck; no decal spans the lifted
+        // nose or crosses facets at a canyon break. Explicit top-facing winding.
+        func mark(_ a: SIMD2<Float>, _ b: SIMD2<Float>, _ c: SIMD2<Float>) {
+            func point(_ p: SIMD2<Float>) -> SIMD3<Float> { SIMD3(p.x, 0.0362, p.y) }
+            let cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+            if cross > 0 { mesh.triangle(point(a), point(c), point(b)) }
+            else { mesh.triangle(point(a), point(b), point(c)) }
+        }
+        // Raised split chevrons supply a legible rear silhouette in portrait view.
+        for row in 0..<3 {
+            let z: Float = -0.06 + Float(row) * 0.18
+            let reach: Float = 0.175 - Float(row) * 0.013
+            for side in [Float(-1), Float(1)] {
+                let a = SIMD2<Float>(side * 0.022, z)
+                let b = SIMD2<Float>(side * reach, z + 0.072)
+                let c = SIMD2<Float>(side * (reach - 0.024), z + 0.118)
+                let d = SIMD2<Float>(side * 0.022, z + 0.041)
+                mark(a, b, d); mark(b, c, d)
             }
-            return SIMD3(x, 0.036, z)
         }
-        mesh.triangle(point(0, -0.48), point(-0.025, 0.34), point(0.025, 0.34))
-        for side in [Float(-1), Float(1)] {
-            let a = point(side * 0.06, -0.24)
-            let b = point(side * 0.17, 0.23)
-            let c = point(side * 0.12, 0.40)
-            if side > 0 { mesh.triangle(a, c, b) } else { mesh.triangle(a, b, c) }
-        }
+        mark(SIMD2(0, 0.47), SIMD2(-0.034, 0.54), SIMD2(0.034, 0.54))
         return try mesh.resource(named: "FoilEnergyInlay")
     }
 
@@ -423,14 +456,17 @@ enum ArcadeGeometry {
             for side in [Float(-1), Float(1)] {
                 let phase = Float(index) * 2.173 + side * 3.7 + Float(course.definition.seed % 97)
                 let variation = abs(sin(phase))
-                let height: Float = biome == .midnight ? 12 + 20 * variation : 6 + 19 * variation
-                let extentX: Float = biome == .dawn ? 5 + 9 * abs(cos(phase * 0.8)) : 2.4 + 4 * abs(cos(phase))
-                let extentZ: Float = biome == .dawn ? 6 + 10 * abs(sin(phase * 0.6)) : 3 + 5 * variation
+                // Dawn's eolian dunes are low and broad, with their steep slipface
+                // turned away from the track. The shared corridor exclusion stays intact.
+                let windDune = biome == .dawn
+                let height: Float = windDune ? 3.5 + 6.5 * variation : (biome == .midnight ? 12 + 20 * variation : 6 + 19 * variation)
+                let extentX: Float = windDune ? 10 + 8 * abs(cos(phase * 0.8)) : 2.4 + 4 * abs(cos(phase))
+                let extentZ: Float = windDune ? 13 + 9 * abs(sin(phase * 0.6)) : 3 + 5 * variation
                 let radius = station.width * 0.5 + 4.8 + extentX + 6 * abs(sin(phase * 1.3))
                 let center = station.center + station.right * side * radius + forward * (sin(phase) * 7) +
                     SIMD3<Float>(0, biome == .orbit ? -3 : -4, 0)
-                let lean = station.right * (side * height * 0.13) + forward * (cos(phase) * 3)
-                let crownRadius: Float = index % 5 == 0 && biome == .dawn ? 0.30 : 0.035
+                let lean = station.right * (side * height * (windDune ? 0.68 : 0.13)) + forward * (cos(phase) * 3)
+                let crownRadius: Float = windDune ? 0.15 : 0.035
                 var base: [SIMD3<Float>] = [], shoulder: [SIMD3<Float>] = [], crown: [SIMD3<Float>] = []
                 for corner in 0..<6 {
                     let angle = Float(corner) * (.pi / 3) + phase * 0.13

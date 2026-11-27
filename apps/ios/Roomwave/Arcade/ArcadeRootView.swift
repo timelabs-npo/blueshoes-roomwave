@@ -191,6 +191,13 @@ struct ArcadeRootView: View {
                         .padding(.horizontal, 18).padding(.vertical, 10)
                         .background(ink.opacity(0.75), in: Capsule())
                 }
+                if let cue = session.masteryCue {
+                    Text(cue).font(.caption.weight(.heavy)).tracking(2)
+                        .foregroundStyle(gold)
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                        .background(ink.opacity(0.85), in: Capsule())
+                        .accessibilityIdentifier("arcade.mastery-cue")
+                }
                 if session.hud.charge > 0.02, !session.hud.airborne {
                     ProgressView(value: min(1, max(0, session.hud.charge))).tint(gold)
                         .frame(width: 120).accessibilityLabel("Launch charge")
@@ -230,27 +237,53 @@ struct ArcadeRootView: View {
 
     private func results(compact: Bool) -> some View {
         ZStack {
-            ink.opacity(0.72).ignoresSafeArea()
+            ink.opacity(0.82).ignoresSafeArea()
             if let result = session.result {
-                if compact {
-                    HStack(spacing: 30) {
-                        resultSummary(result, compact: true)
-                        resultActions(result)
-                    }.padding(22).frame(maxWidth: 780)
-                } else {
-                    VStack(spacing: 20) {
-                        resultSummary(result, compact: false)
-                        resultActions(result)
-                        notice
-                    }.padding(24).frame(maxWidth: 500)
-                }
+                ArcadeFinishHorizon(completed: result.completed,
+                                    reduceMotion: systemReducedMotion || session.reducedMotion)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                ScrollView {
+                    VStack(spacing: compact ? 12 : 20) {
+                        if compact {
+                            HStack(spacing: 30) {
+                                resultSummary(result, compact: true)
+                                resultActions(result)
+                            }
+                        } else {
+                            resultSummary(result, compact: false)
+                            resultActions(result)
+                            notice
+                        }
+                        resultCredits
+                    }
+                    .padding(compact ? 16 : 24)
+                    .frame(maxWidth: compact ? 780 : 500)
+                    .frame(maxWidth: .infinity)
+                }.defaultScrollAnchor(.center, for: .alignment)
             }
         }
     }
 
+    private var resultCredits: some View {
+        VStack(spacing: 3) {
+            Text("CREDITS").font(.caption2.weight(.bold)).tracking(2)
+                .accessibilityIdentifier("arcade.run-credits")
+            Text("Roomwave team · original art, animation & sound")
+            Link("Quaternius · rider base & rig (CC0)",
+                 destination: URL(string: "https://quaternius.com/packs/universalbasecharacters.html")!)
+                .foregroundStyle(teal)
+                .frame(minHeight: 44)
+        }
+        .font(.caption)
+        .foregroundStyle(.white.opacity(0.84))
+        .multilineTextAlignment(.center)
+    }
+
     private func resultSummary(_ result: SurfRunResult, compact: Bool) -> some View {
         VStack(spacing: compact ? 10 : 18) {
-            Text(result.completed ? "CURRENT CONQUERED" : "BACK TO THE CURRENT")
+            Text(result.completed ? "LINE COMPLETE" : "RUN ENDED")
                 .font(.system(size: compact ? 12 : 16, weight: .bold)).tracking(2).foregroundStyle(teal)
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(result.score.formatted()).font(.system(size: compact ? 48 : 68, weight: .bold))
@@ -290,7 +323,7 @@ struct ArcadeRootView: View {
                 }
             }
             Button("Open X composer") {
-                if let url = ArcadeSharing.xComposer(result: result, title: session.title) { openURL(url) }
+                if let url = ArcadeSharing.xComposer(result: result) { openURL(url) }
             }
             .font(.footnote).foregroundStyle(.white.opacity(0.75)).frame(minHeight: 44)
             .accessibilityHint("Opens your editable post. You choose whether to publish it.")
@@ -433,4 +466,44 @@ private final class ArcadeTouchView: UIView {
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { cancel() }
     override func didMoveToWindow() { if window == nil { cancel() } }
     func cancel() { heldTouches.removeAll(keepingCapacity: true); cancelled?() }
+}
+
+private struct ArcadeFinishHorizon: View {
+    let completed: Bool
+    let reduceMotion: Bool
+    @State private var settled = false
+
+    var body: some View {
+        Canvas { context, size in
+            let w = size.width, h = size.height
+            let bronze = Color(red: 0.76, green: 0.36, blue: 0.23)
+            let accent = completed
+                ? Color(red: 1, green: 0.75, blue: 0.39)
+                : Color(red: 0.39, green: 0.68, blue: 0.68)
+            let horizon = CGPoint(x: w * 0.76, y: h * 0.26)
+            let r = min(w, h) * 0.24
+            let glow = Path(ellipseIn: CGRect(x: horizon.x - r, y: horizon.y - r,
+                                              width: 2 * r, height: 2 * r))
+            context.fill(glow, with: .radialGradient(
+                Gradient(colors: [accent.opacity(0.54), accent.opacity(0)]),
+                center: horizon, startRadius: 0, endRadius: r))
+            for i in 0..<3 {
+                let y = h * (0.63 + CGFloat(i) * 0.11)
+                var dune = Path()
+                dune.move(to: CGPoint(x: -10, y: y))
+                dune.addCurve(to: CGPoint(x: w + 10, y: y - h * 0.11),
+                              control1: CGPoint(x: w * 0.33, y: y + h * 0.25),
+                              control2: CGPoint(x: w * 0.67, y: y - h * 0.37))
+                context.stroke(dune, with: .linearGradient(
+                    Gradient(colors: [.clear, bronze.opacity(0.52), accent.opacity(0.64), .clear]),
+                    startPoint: .zero, endPoint: CGPoint(x: w, y: 0)), lineWidth: i == 0 ? 2 : 1)
+            }
+        }
+        .scaleEffect(reduceMotion || settled ? 1 : 1.045)
+        .opacity(reduceMotion || settled ? 1 : 0)
+        .onAppear {
+            if reduceMotion { settled = true }
+            else { withAnimation(.easeOut(duration: 0.55)) { settled = true } }
+        }
+    }
 }

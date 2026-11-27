@@ -68,6 +68,8 @@ final class ArcadeFlowUITests: XCTestCase {
         let retry = app.buttons["arcade.retry"]
         XCTAssertTrue(retry.waitForExistence(timeout: 165), "A real run must end with a result")
         Thread.sleep(forTimeInterval: 1)
+        XCTAssertTrue(app.staticTexts["arcade.run-credits"].exists,
+                      "A completed or failed run must expose credits without a modal")
         attach(app, "07-result")
         retry.tap()
         XCTAssertTrue(app.buttons["arcade.pause"].waitForExistence(timeout: 5))

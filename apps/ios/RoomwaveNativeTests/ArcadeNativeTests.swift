@@ -32,11 +32,17 @@ final class ArcadeNativeTests: XCTestCase {
         let parts = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
         XCTAssertEqual(parts.scheme, "roomwave")
         XCTAssertEqual(parts.queryItems?.first(where: { $0.name == "course" })?.value, "neon-dawn")
-        let intent = try XCTUnwrap(ArcadeSharing.xComposer(result: result, title: "NEON DAWN"))
+        let intent = try XCTUnwrap(ArcadeSharing.xComposer(result: result))
         XCTAssertEqual(intent.host, "x.com")
         XCTAssertEqual(intent.path, "/intent/tweet")
-        XCTAssertTrue(URLComponents(url: intent, resolvingAgainstBaseURL: false)?.queryItems?
-            .first(where: { $0.name == "text" })?.value?.contains("1234") == true)
+        let items = try XCTUnwrap(URLComponents(url: intent, resolvingAgainstBaseURL: false)?.queryItems)
+        let message = try XCTUnwrap(items.first(where: { $0.name == "text" })?.value)
+        XCTAssertTrue(message.contains("1234"))
+        XCTAssertTrue(message.contains(result.courseID))
+        XCTAssertTrue(message.contains(result.rulesVersion))
+        XCTAssertTrue(message.contains("Reply with your score"))
+        XCTAssertEqual(items.first(where: { $0.name == "url" })?.value,
+                       "https://github.com/timelabs-npo/blueshoes-roomwave")
     }
 
     @MainActor
@@ -46,5 +52,10 @@ final class ArcadeNativeTests: XCTestCase {
         let share = try ArcadeSharing.make(result: result, title: "PHOTO CURRENT")
         XCTAssertNil(share.challenge)
         XCTAssertTrue(share.text.contains("no shared challenge link"))
+        let intent = try XCTUnwrap(ArcadeSharing.xComposer(result: result))
+        let message = try XCTUnwrap(URLComponents(url: intent, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "text" })?.value)
+        XCTAssertTrue(message.contains("not a replay link"))
+        XCTAssertFalse(message.contains(result.courseID))
     }
 }
