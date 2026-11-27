@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 import RealityKit
 import RoomwaveArcade
 @testable import Roomwave
@@ -55,6 +56,12 @@ final class ArcadeNativeTests: XCTestCase {
     }
 
     @MainActor
+    func testMITGlyphsAreBundled() {
+        XCTAssertNotNil(UIImage(named: "xsurf-character-glyph"))
+        XCTAssertNotNil(UIImage(named: "xsurf-share-glyph"))
+    }
+
+    @MainActor
     func testShareCardUsesActualFactsAndAnEditableXIntent() throws {
         let result = SurfRunResult(courseID: "neon-dawn", rulesVersion: SurfRules.standard.version,
             score: 1234, seconds: 70, rings: 8, perfectLandings: 4, bestCombo: 9, completed: true, medal: .silver)
@@ -71,11 +78,10 @@ final class ArcadeNativeTests: XCTestCase {
         let items = try XCTUnwrap(URLComponents(url: intent, resolvingAgainstBaseURL: false)?.queryItems)
         let message = try XCTUnwrap(items.first(where: { $0.name == "text" })?.value)
         XCTAssertTrue(message.contains("1234"))
-        XCTAssertTrue(message.contains(result.courseID))
-        XCTAssertTrue(message.contains(result.rulesVersion))
-        XCTAssertTrue(message.contains("Reply with your score"))
-        XCTAssertEqual(items.first(where: { $0.name == "url" })?.value,
-                       "https://github.com/timelabs-npo/blueshoes-roomwave")
+        XCTAssertTrue(message.contains("xsurf"))
+        XCTAssertTrue(message.contains("in the beta"))
+        XCTAssertEqual(items.map(\.name), ["text"])
+        XCTAssertEqual(message, ArcadeSharing.xDraft(result: result))
     }
 
     @MainActor
@@ -90,5 +96,7 @@ final class ArcadeNativeTests: XCTestCase {
             .queryItems?.first(where: { $0.name == "text" })?.value)
         XCTAssertTrue(message.contains("not a replay link"))
         XCTAssertFalse(message.contains(result.courseID))
+        XCTAssertFalse(message.contains("PHOTO CURRENT"))
+        XCTAssertFalse(message.contains("http"))
     }
 }

@@ -24,36 +24,33 @@ enum ArcadeSharing {
         renderer.scale = 2
         guard let image = renderer.uiImage else { throw ShareError.renderFailed }
         let medalText = result.medal == .none ? "No medal" : "\(result.medal.rawValue.capitalized) medal"
-        let text = "TWITTER SURFER\n\(title) · \(result.score.formatted()) points\n"
+        let text = "xsurf\n\(title) · \(result.score.formatted()) points\n"
             + "\(result.completed ? "Complete" : "Run ended") · \(medalText)\n"
             + "\(result.rings) rings · \(result.perfectLandings) perfect landings · ×\(result.bestCombo) best combo\n"
             + "Rules: \(result.rulesVersion)\n"
-            + (url == nil ? "A locally created course; no shared challenge link in this beta." : "Play this course in Twitter Surfer.")
+            + (url == nil ? "A locally created course; no shared challenge link in this beta." : "Play this course in xsurf.")
         return ArcadeSharePayload(image: image, text: text, challenge: url)
     }
 
-    /// User-invoked editable web intent; it neither uploads a local card/video
-    /// nor confirms that anything was posted.
-    static func xComposer(result: SurfRunResult) -> URL? {
+    /// A user-invoked draft; no authentication, media upload, or publish call.
+    static func xDraft(result: SurfRunResult) -> String? {
         guard result.rulesVersion == SurfRules.standard.version else { return nil }
-        var components = URLComponents()
-        components.scheme = "https"; components.host = "x.com"; components.path = "/intent/tweet"
-        let text: String
         if ArcadeProfile.courseIDs.contains(result.courseID),
-           let authored = SurfCatalog.course(id: result.courseID) {
-            // The web link below opens the project, not the run. Give a player
-            // with the beta installed an honest, copyable course/rules identity.
-            text = "Can you beat \(result.score) on \(authored.title) in Roomwave? "
-                + "In the beta, choose \(authored.title) (\(result.courseID), \(result.rulesVersion)). "
-                + "Reply with your score and the first thing that felt unclear."
-        } else {
-            // Never share a photo/LiDAR/X-derived course title or identifier
-            // with X. It is not a portable same-course challenge.
-            text = "I scored \(result.score) on a custom Roomwave course. "
-                + "This is a score recap, not a replay link."
+           let course = SurfCatalog.course(id: result.courseID) {
+            return "I scored \(result.score) on \(course.title) in xsurf. "
+                + "Pick \(course.title) in the beta and see if you can beat it."
         }
-        components.queryItems = [URLQueryItem(name: "text", value: text),
-            URLQueryItem(name: "url", value: "https://github.com/timelabs-npo/blueshoes-roomwave")]
+        // Never send a photo/LiDAR/X-derived course name, ID or media to X.
+        return "I scored \(result.score) on a custom course in xsurf. Score recap, not a replay link."
+    }
+
+    static func xComposer(result: SurfRunResult) -> URL? {
+        guard let text = xDraft(result: result) else { return nil }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "x.com"
+        components.path = "/intent/tweet"
+        components.queryItems = [URLQueryItem(name: "text", value: text)]
         return components.url
     }
 
