@@ -66,8 +66,10 @@ final class ArcadeFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["arcade.share-x"].exists,
                       "A real result must offer an editable X draft without publishing")
         attach(app, "07-result")
+        XCTAssertTrue(retry.isHittable, "The visible result button must accept an ordinary touch")
         retry.tap()
-        XCTAssertTrue(app.buttons["arcade.pause"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["arcade.pause"].waitForExistence(timeout: 5),
+                      "A real tap on Retry must immediately open the next ride")
         touch.press(forDuration: 0.7)
         Thread.sleep(forTimeInterval: 0.4)
         attach(app, "08-immediate-retry")

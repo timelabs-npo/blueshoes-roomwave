@@ -30,7 +30,8 @@ struct ArcadeRootView: View {
             let compact = geometry.size.height < 500
             ZStack {
                 ink.ignoresSafeArea()
-                ArcadeSceneHost(scene: session.scene).ignoresSafeArea().accessibilityHidden(true)
+                ArcadeSceneHost(scene: session.scene).ignoresSafeArea()
+                    .allowsHitTesting(false).accessibilityHidden(true)
                 LinearGradient(colors: [.black.opacity(0.48), .clear, .black.opacity(0.7)],
                                startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea().allowsHitTesting(false)
@@ -480,6 +481,7 @@ struct ArcadeRootView: View {
             Label(title, systemImage: symbol).font(.system(size: 17, weight: .bold)).tracking(2)
                 .frame(maxWidth: .infinity).frame(minHeight: 56)
                 .background(teal, in: Capsule()).foregroundStyle(ink)
+                .contentShape(Capsule())
         }.buttonStyle(.plain).frame(maxWidth: 360)
     }
 
