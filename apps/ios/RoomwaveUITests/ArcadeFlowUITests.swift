@@ -29,37 +29,7 @@ final class ArcadeFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["AFTERGLOW CISTERN"].waitForExistence(timeout: 5))
         attach(app, "03b-home-afterglow-cistern")
 
-        let character = app.buttons["arcade.crews"]
-        character.tap()
-        let basalt = app.buttons["arcade.role.basalt-guard"]
-        XCTAssertTrue(basalt.waitForExistence(timeout: 5))
-        basalt.tap()
-        XCTAssertTrue(app.staticTexts["arcade.role-title"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["arcade.role-title"].label, "Basalt Guard")
-        app.buttons["Done"].tap()
-        XCTAssertEqual(character.value as? String, "Basalt Guard")
-        character.tap()
-        XCTAssertTrue(basalt.waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["arcade.role-title"].label, "Basalt Guard")
-        app.buttons["arcade.role.dune-runners"].tap()
-        app.buttons["Done"].tap()
-        XCTAssertEqual(character.value as? String, "Dune Runners")
-
-        let settings = app.buttons["arcade.settings"]
-        settings.tap()
-        app.buttons["arcade.creator"].tap()
-        XCTAssertTrue(app.buttons["creator.photo"].waitForExistence(timeout: 5))
-        app.buttons["Done"].tap()
-        XCTAssertTrue(play.waitForExistence(timeout: 5))
-        settings.tap()
-        app.buttons["arcade.x-currents"].tap()
-        XCTAssertTrue(app.segmentedControls["x.source"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["x.ride"].exists, "No activity course may be invented before a real read")
-        if app.staticTexts["x.unavailable"].exists {
-            XCTAssertFalse(app.buttons["x.connect"].isEnabled, "Missing X registration must not start pretend authentication")
-        }
-        app.buttons["Done"].tap()
-        XCTAssertTrue(play.waitForExistence(timeout: 5), "Optional X setup must not block the ordinary game")
+        XCTAssertTrue(play.waitForExistence(timeout: 5), "The run must be available before any optional setup")
         play.tap()
         XCTAssertTrue(app.buttons["arcade.pause"].waitForExistence(timeout: 10))
         let touch = app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.64))
@@ -104,6 +74,41 @@ final class ArcadeFlowUITests: XCTestCase {
         app.buttons["arcade.pause"].tap()
         app.buttons["arcade.home"].tap()
         XCTAssertTrue(play.waitForExistence(timeout: 5))
+
+        // Capture the essential run before opening optional sheets. Keep their real-touch checks.
+        let character = app.buttons["arcade.crews"]
+        character.tap()
+        let basalt = app.buttons["arcade.role.basalt-guard"]
+        XCTAssertTrue(basalt.waitForExistence(timeout: 5))
+        basalt.tap()
+        XCTAssertTrue(app.staticTexts["arcade.role-title"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["arcade.role-title"].label, "Basalt Guard")
+        app.buttons["Done"].tap()
+        XCTAssertEqual(character.value as? String, "Basalt Guard")
+        character.tap()
+        XCTAssertTrue(basalt.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["arcade.role-title"].label, "Basalt Guard")
+        app.buttons["arcade.role.dune-runners"].tap()
+        app.buttons["Done"].tap()
+        XCTAssertEqual(character.value as? String, "Dune Runners")
+
+        let settings = app.buttons["arcade.settings"]
+        settings.tap()
+        app.buttons["arcade.creator"].tap()
+        XCTAssertTrue(app.buttons["creator.photo"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["creator.photo"].waitForNonExistence(timeout: 15))
+        waitForEnabled(settings)
+        settings.tap()
+        app.buttons["arcade.x-currents"].tap()
+        XCTAssertTrue(app.segmentedControls["x.source"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["x.ride"].exists, "No activity course may be invented before a real read")
+        if app.staticTexts["x.unavailable"].exists {
+            XCTAssertFalse(app.buttons["x.connect"].isEnabled, "Missing X registration must not start pretend authentication")
+        }
+        app.buttons["Done"].tap()
+        XCTAssertTrue(play.waitForExistence(timeout: 5), "Optional X setup must not block the ordinary game")
     }
 
     @MainActor

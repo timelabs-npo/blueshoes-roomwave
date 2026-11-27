@@ -11,3 +11,8 @@ The campaign premise is a desert cistern in a world where people conserve water,
 This slice has testable timing, a text cue and an earned result treatment, not a new world renderer or licensed franchise. Motion reduction preserves the result message and static art. The proposed next art pass should use a quiet start, blue-black arch silhouette, then a color reveal; no flash over hazards. Do not report enjoyment, visual legibility or real frame rate from hosted checks. Acceptance on phone: five uncoached people; at least 4 finish, at least 3 independently explain how to earn the Crown, and at least 3 choose a second run before any moderator prompt. Record first failure and timings, not just ratings. The target duration of the safe line is 26–40 seconds.
 
 Compare three result outcomes: skipped the Crown, caught it and missed the landing, or earned the finale. After recording unprompted Retry, ask what the player would change next, not before. Test a pale former waterline tracing the safe route in a separate render pass, with sound off and Reduce Motion on, before attributing any cue-comprehension gain to it.
+
+### Verify before promoting
+
+- Run 45983717863 (`8711bf1`): 18 Swift core tests passed; simulator UI timed out in the optional Creator → Settings transition before any ride. Native readiness failed and no signed upload occurred. It did not retest the previous run's missing independent Results snapshot.
+- Revised real-touch script runs Play → Pause → Result → Retry before optional character, creator and X sheet coverage. Those checks remain required, and the independent RealityKit verifier is unchanged. Results capture now reports a bounded diagnostic reason only if the candidate frame is stale, empty or rejected by the same validation.

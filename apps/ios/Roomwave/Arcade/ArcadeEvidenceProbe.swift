@@ -90,6 +90,7 @@ enum ArcadeEvidenceProbe {
             }
             recordStage("snapshot_request")
             arView.snapshot(saveToHDR: false) { image in
+                let hadImage = image != nil
                 let width = image?.cgImage?.width ?? 0
                 let height = image?.cgImage?.height ?? 0
                 let pixelRange = image?.cgImage.map { sampledPixelRange($0) } ?? 0
@@ -100,8 +101,16 @@ enum ArcadeEvidenceProbe {
                     recordStage("snapshot_callback")
                     pending.remove(mode)
                     guard generation == requestGeneration, latestScreen == screen,
-                          latestCourse == courseID, latestTick >= requestTick,
-                          let png, width >= 100, height >= 100, pixelRange >= 24 else { return }
+                          latestCourse == courseID, latestTick >= requestTick else {
+                        if mode == "results" { recordStage("results_snapshot_stale_context") }
+                        return
+                    }
+                    guard let png, width >= 100, height >= 100, pixelRange >= 24 else {
+                        if mode == "results" {
+                            recordStage(hadImage == false ? "results_snapshot_empty" : "results_snapshot_pixels_rejected")
+                        }
+                        return
+                    }
                     let filename = mode + ".png"
                     do {
                         try png.write(to: directory.appendingPathComponent(filename), options: .atomic)
