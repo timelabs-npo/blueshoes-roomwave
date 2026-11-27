@@ -60,6 +60,16 @@ final class ArcadeFlowUITests: XCTestCase {
         XCTAssertTrue(play.waitForExistence(timeout: 5), "Optional X setup must not block the ordinary game")
         play.tap()
         XCTAssertTrue(app.buttons["arcade.pause"].waitForExistence(timeout: 10))
+        // Pause while the fresh run is still live; capture/touch round trips can outlast its shields.
+        app.buttons["arcade.pause"].tap()
+        let resume = app.buttons["arcade.resume"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 5))
+        attach(app, "06-paused")
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(resume.waitForExistence(timeout: 5), "Foreground must not silently resume")
+        resume.tap()
+
         let touch = app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.64))
         // Same touch surface and physics as ordinary gameplay. No injected bot.
         touch.press(forDuration: 0.8)
@@ -69,14 +79,6 @@ final class ArcadeFlowUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.2)
         attach(app, "05-landing")
 
-        app.buttons["arcade.pause"].tap()
-        let resume = app.buttons["arcade.resume"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 5))
-        attach(app, "06-paused")
-        XCUIDevice.shared.press(.home)
-        app.activate()
-        XCTAssertTrue(resume.waitForExistence(timeout: 5), "Foreground must not silently resume")
-        resume.tap()
         for _ in 0..<3 {
             guard app.buttons["arcade.pause"].exists else { break }
             touch.press(forDuration: 0.6)
