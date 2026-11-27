@@ -257,7 +257,7 @@ struct ArcadeRootView: View {
         ZStack {
             ink.opacity(0.82).ignoresSafeArea()
             if let result = session.result {
-                ArcadeFinishHorizon(completed: result.completed,
+                ArcadeFinishHorizon(completed: result.completed, crowned: result.completed && session.afterglowEarned,
                                     reduceMotion: systemReducedMotion || session.reducedMotion)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
@@ -316,6 +316,13 @@ struct ArcadeRootView: View {
                 .accessibilityFocused($resultTitleFocused)
                 .onAppear { resultTitleFocused = true }
                 .onDisappear { resultTitleFocused = false }
+            if result.completed && session.selectedID == SurfAfterglow.id {
+                Text(session.afterglowEarned ? "THE DUST BOWS" : "SAFE LINE · NEXT RUN, TRY THE CROWN")
+                    .font(.headline.weight(.heavy))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(session.afterglowEarned ? Color(red: 1, green: 0.55, blue: 0.84) : gold)
+                    .accessibilityIdentifier("arcade.afterglow-finale")
+            }
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(result.score.formatted()).font(.system(size: compact ? 48 : 68, weight: .bold))
                     .monospacedDigit().minimumScaleFactor(0.5).lineLimit(1)
@@ -555,6 +562,7 @@ private final class ArcadeTouchView: UIView {
 
 private struct ArcadeFinishHorizon: View {
     let completed: Bool
+    let crowned: Bool
     let reduceMotion: Bool
     @State private var settled = false
 
@@ -562,8 +570,8 @@ private struct ArcadeFinishHorizon: View {
         Canvas { context, size in
             let w = size.width, h = size.height
             let bronze = Color(red: 0.76, green: 0.36, blue: 0.23)
-            let accent = completed
-                ? Color(red: 1, green: 0.75, blue: 0.39)
+            let accent = crowned ? Color(red: 1, green: 0.36, blue: 0.74)
+                : completed ? Color(red: 1, green: 0.75, blue: 0.39)
                 : Color(red: 0.39, green: 0.68, blue: 0.68)
             let horizon = CGPoint(x: w * 0.76, y: h * 0.26)
             let r = min(w, h) * 0.24
@@ -572,6 +580,19 @@ private struct ArcadeFinishHorizon: View {
             context.fill(glow, with: .radialGradient(
                 Gradient(colors: [accent.opacity(0.54), accent.opacity(0)]),
                 center: horizon, startRadius: 0, endRadius: r))
+            if crowned {
+                for i in 0..<7 {
+                    let ray = CGFloat(i - 3)
+                    var fold = Path()
+                    fold.move(to: CGPoint(x: w * 0.5, y: h * 0.66))
+                    fold.addQuadCurve(to: CGPoint(x: w * (0.5 + ray * 0.15), y: h * 0.14),
+                                      control: CGPoint(x: w * (0.5 + ray * 0.11), y: h * 0.39))
+                    context.stroke(fold, with: .linearGradient(
+                        Gradient(colors: [.clear, accent.opacity(0.47), .clear]),
+                        startPoint: CGPoint(x: 0, y: h * 0.69), endPoint: CGPoint(x: 0, y: h * 0.12)),
+                        lineWidth: i == 3 ? 2.5 : 1.25)
+                }
+            }
             for i in 0..<3 {
                 let y = h * (0.63 + CGFloat(i) * 0.11)
                 var dune = Path()

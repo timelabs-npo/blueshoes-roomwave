@@ -5,9 +5,9 @@ public enum SurfCatalog {
     public static var all: [SurfCourseDefinition] { authored }
     /// The launch catalog stays fixed for older fixtures and daily seeds.
     /// Featured courses include opt-in routes with their own score/replay identity.
-    public static var featured: [SurfCourseDefinition] { authored + [prismBreak] }
+    public static var featured: [SurfCourseDefinition] { authored + [SurfAfterglow.course, prismBreak] }
     public static func course(id: String) -> SurfCourseDefinition? {
-        id == prismBreak.id ? prismBreak : authored.first { $0.id == id }
+        featured.first { $0.id == id }
     }
 
     private static let prismBreak: SurfCourseDefinition = {
