@@ -271,9 +271,13 @@ final class ArcadeSceneController: ArcadeSceneDriving {
             }
         }
         updateGhost(ghost, course: course)
-        followCamera(foot: foot, road: road, forward: flatForward, distance: state.distance,
-                     speed: speedFraction, mode: .gameplay, dt: dt,
-                     reducedMotion: reducedMotion, snap: snap, previewOffset: 0)
+        if state.phase == .finished && course.definition.id == SurfAfterglow.id {
+            frameAfterglowFinish(foot: foot, forward: flatForward, course: course)
+        } else {
+            followCamera(foot: foot, road: road, forward: flatForward, distance: state.distance,
+                         speed: speedFraction, mode: .gameplay, dt: dt,
+                         reducedMotion: reducedMotion, snap: snap, previewOffset: 0)
+        }
         previousTick = state.tick
         lastRenderedDistance = state.distance
         wasPreview = false
@@ -351,6 +355,21 @@ final class ArcadeSceneController: ArcadeSceneDriving {
         hitImpulse = 0
         eventAge = 0
         wasPreview = true
+    }
+
+    /// Afterglow stops at the end of the track. The chase view normally aims
+    /// beyond the rider; that leaves the result backdrop looking into empty sky.
+    /// An immediate, still finish view keeps the path and rider in frame, also
+    /// with Reduce Motion. No change to simulation, timings or capture checks.
+    private func frameAfterglowFinish(foot: SIMD3<Float>, forward: SIMD3<Float>,
+                                      course: CompiledSurfCourse) {
+        let right = simd_cross(forward, SIMD3<Float>(0, 1, 0))
+        let position = foot - forward * 8 + right * 2.0 + SIMD3<Float>(0, 8, 0)
+        let path = ArcadeGeometry.vector(course.pose(at: max(0, course.length - 4)).center)
+        let target = (foot + path) * 0.5 + SIMD3<Float>(0, 0.2, 0)
+        camera.look(at: target, from: position, relativeTo: nil)
+        camera.camera.fieldOfViewInDegrees = 56
+        art?.sky.position = SIMD3(position.x, Float(course.definition.samples.first?.center.y ?? 0), position.z)
     }
 
     private func followCamera(foot: SIMD3<Float>, road: SIMD3<Float>, forward: SIMD3<Float>,

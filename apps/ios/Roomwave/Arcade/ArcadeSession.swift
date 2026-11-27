@@ -44,6 +44,14 @@ final class ArcadeSession: ObservableObject {
     private var calloutUntil = 0.0
     private var callout = ""
     private var calloutID = 0
+    private var afterglow = SurfAfterglow.Finale()
+    var afterglowEarned: Bool { selectedID == SurfAfterglow.id && afterglow.earned }
+    var afterglowFinishCue: String? {
+        guard selectedID == SurfAfterglow.id, result?.completed == true else { return nil }
+        if afterglow.earned { return "THE DUST BOWS" }
+        if afterglow.caughtCrown { return "CROWN CAUGHT · LAND CLEAN" }
+        return "SAFE LINE · TRY THE CROWN"
+    }
 
     var reducedMotion: Bool { preferences.reducedMotion || systemReducedMotion }
     var availableCourseIDs: [String] {
@@ -65,8 +73,13 @@ final class ArcadeSession: ObservableObject {
     /// Read the next upcoming hazard, not decorative effects. The cue is
     /// text/shape based and appears before the collider at maximum speed.
     var masteryCue: String? {
-        guard selectedID == "prism-break", screen == .playing,
-              let course, let state,
+        guard (selectedID == "prism-break" || selectedID == SurfAfterglow.id),
+              screen == .playing, let course, let state else { return nil }
+        if selectedID == SurfAfterglow.id,
+           (SurfAfterglow.finalRingDistance - 44..<SurfAfterglow.finalRingDistance - 5).contains(state.distance) {
+            return "↑  CROWN ABOVE · LOW LINE IS SAFE"
+        }
+        guard
               let hazard = course.definition.encounters.dropFirst(state.encounterCursor).prefix(4)
                   .first(where: { $0.kind == .barrier || $0.kind == .ceiling }),
               (0...24).contains(hazard.distance - state.distance) else { return nil }
@@ -247,6 +260,7 @@ final class ArcadeSession: ObservableObject {
         inputs.removeAll(keepingCapacity: true)
         state = SurfSimulation.start(course: course, rules: rules)
         result = nil; previousBest = nil; tutorialCue = .charge
+        afterglow = SurfAfterglow.Finale()
         screen = .playing
         publishHUD(now: CACurrentMediaTime())
         audio.beginNewRace()
@@ -376,6 +390,7 @@ final class ArcadeSession: ObservableObject {
                 let step = try SurfSimulation.step(state: current, input: input, course: course, rules: rules)
                 cancelInputOnNextTick = false
                 inputs.append(input)
+                let earnedCrown = afterglow.observe(courseID: selectedID, previous: current, step: step)
                 current = step.state
                 accumulator -= tickDuration
                 steps += 1
@@ -387,6 +402,10 @@ final class ArcadeSession: ObservableObject {
                         callout = message; calloutUntil = now + 1.1; calloutID += 1
                         significant = true
                     }
+                }
+                if earnedCrown {
+                    callout = "THE DUST BOWS"; calloutUntil = now + 2; calloutID += 1
+                    significant = true
                 }
                 if !preferences.tutorialSeen,
                    SurfTutorialGuidance.observedCleanLanding(in: step.events) {
@@ -422,6 +441,17 @@ final class ArcadeSession: ObservableObject {
         screen = .results
         publishHUD(now: CACurrentMediaTime())
         observeEvidence()
+        #if DEBUG
+        // Results has no display link to retry a rejected asynchronous frame.
+        // Re-observe only this exact state after the compositor has settled.
+        for delay in [0.75, 2.0, 3.25] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.screen == .results, self.isActive,
+                      self.state == final, self.course?.definition.id == course.definition.id else { return }
+                self.observeEvidence()
+            }
+        }
+        #endif
     }
 
     private func observeEvidence(events: [SurfEvent] = []) {
