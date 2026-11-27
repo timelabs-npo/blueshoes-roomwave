@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import AVFoundation
 import RealityKit
 import RoomwaveArcade
 @testable import Roomwave
@@ -52,6 +53,18 @@ final class ArcadeNativeTests: XCTestCase {
             XCTAssertEqual(session.selectedID, "neon-dawn")
             XCTAssertNil(session.course)
             XCTAssertNotNil(session.statusMessage)
+        }
+    }
+
+    @MainActor
+    func testRadioRotationIsBundledAndDecodes() throws {
+        XCTAssertEqual(ArcadeRadioTrack.rotation.count, 2)
+        for track in ArcadeRadioTrack.rotation {
+            let url = try XCTUnwrap(track.url)
+            XCTAssertTrue(url.isFileURL)
+            let player = try AVAudioPlayer(contentsOf: url)
+            XCTAssertGreaterThan(player.duration, 90)
+            XCTAssertEqual(track.source.host, "opengameart.org")
         }
     }
 

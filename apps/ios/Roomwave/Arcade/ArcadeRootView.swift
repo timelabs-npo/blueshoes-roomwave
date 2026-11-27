@@ -289,6 +289,11 @@ struct ArcadeRootView: View {
             Text("CREDITS").font(.caption2.weight(.bold)).tracking(2)
                 .accessibilityIdentifier("arcade.run-credits")
             Text("Roomwave team · original art, animation & sound")
+            if let track = session.raceTrackCredit {
+                Link("\(track.title) · MintoDog · CC0", destination: track.source)
+                    .foregroundStyle(teal)
+                    .frame(minHeight: 44)
+            }
             Link("Quaternius · rider base & rig (CC0)",
                  destination: URL(string: "https://quaternius.com/packs/universalbasecharacters.html")!)
                 .foregroundStyle(teal)

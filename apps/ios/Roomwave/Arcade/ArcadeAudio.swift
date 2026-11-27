@@ -3,8 +3,7 @@ import Darwin
 import UIKit
 import RoomwaveArcade
 
-/// Original oscillator music and cues, synthesized once off the audio render thread.
-/// Four reusable cue nodes bound polyphony; no source-node callback or streamed media.
+/// Live cues and a local radio rotation. Synthesized music is an offline fallback.
 @MainActor
 final class ArcadeAudio: NSObject {
     private enum Cue: Int, CaseIterable { case launch, landing, ring, boost, hit, finish }
@@ -16,6 +15,10 @@ final class ArcadeAudio: NSObject {
     private var music: [AVAudioPlayerNode] = []
     private var lastMusicMixTime: TimeInterval?
     private var musicEnergy = 0.0
+    private var radio: AVAudioPlayer?
+    private var radioIndex = -1
+    private var radioUnavailable = false
+    private(set) var playedRadioTrack: ArcadeRadioTrack?
     private var voices: [AVAudioPlayerNode] = []
     private var buffers: [AVAudioPCMBuffer] = []
     private var voiceIndex = 0
@@ -97,6 +100,39 @@ final class ArcadeAudio: NSObject {
         reconcileSession()
     }
 
+    func beginNewRace() {
+        stopMusic()
+        radio?.stop()
+        radio = nil
+        let count = ArcadeRadioTrack.rotation.count
+        radioIndex = count == 0 ? -1 : (radioIndex + 1) % count
+        radioUnavailable = false
+        playedRadioTrack = nil
+    }
+
+    private func startRadio() -> Bool {
+        guard !radioUnavailable, ArcadeRadioTrack.rotation.indices.contains(radioIndex) else {
+            return false
+        }
+        let track = ArcadeRadioTrack.rotation[radioIndex]
+        if radio == nil {
+            guard let url = track.url, let player = try? AVAudioPlayer(contentsOf: url) else {
+                radioUnavailable = true
+                return false
+            }
+            player.numberOfLoops = -1
+            player.volume = 0.23
+            radio = player
+        }
+        guard let radio, radio.isPlaying || radio.play() else {
+            radio = nil
+            radioUnavailable = true
+            return false
+        }
+        playedRadioTrack = track
+        return true
+    }
+
     func configure(_ preferences: ArcadePreferences, running: Bool) {
         generation &+= 1
         finishTask?.cancel(); finishTask = nil
@@ -176,6 +212,10 @@ final class ArcadeAudio: NSObject {
         guard wantsAudio, running, sessionState == .active else { return }
         do {
             if !engine.isRunning { try engine.start() }
+            if startRadio() {
+                notice = nil
+                return
+            }
             if lastMusicMixTime == nil {
                 // All stems have exactly the same length and start at one host time.
                 // Schedule once per run/resume. Intensity never replaces or seeks loops.
@@ -274,6 +314,7 @@ final class ArcadeAudio: NSObject {
     }
 
     private func stopMusic() {
+        radio?.pause()
         music.forEach { $0.stop() }
         lastMusicMixTime = nil
         musicEnergy = 0
